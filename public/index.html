@@ -150,7 +150,13 @@
     .modal-status.error { color:var(--red); }
     .voice-player { width:100%; margin-top:10px; }
     .video-result { display:none; margin-top:16px; padding:12px; background:#0c1522; border:1px solid #30435d; border-radius:9px; }
+    .scene-image-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:12px 0; }
+    .scene-image-card { min-width:0; padding:8px; background:#19273a; border:1px solid #30435d; border-radius:9px; }
+    .scene-image-card img { display:block; width:100%; aspect-ratio:9/16; object-fit:cover; border-radius:6px; background:#0c1522; }
+    .scene-image-card small { display:block; margin-top:7px; color:#aab9cb; font-size:10px; }
+    .scene-image-note { margin:8px 0; color:#d5ad70; font-size:10px; line-height:1.55; }
     .video-result video { width:min(260px,100%); display:block; margin:0 auto 10px; background:#000; border-radius:8px; }
+    @media (max-width: 700px) { .scene-image-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
     .video-result a { display:block; text-align:center; color:#e6c78e; font-size:12px; text-decoration:underline; }
     .privacy-note { color:#8091a7; font-size:10px; line-height:1.55; margin-top:8px; }
     .empty { padding: 35px 20px; text-align: center; color: var(--muted); font-size: 12px; }
@@ -423,6 +429,12 @@
           </div>
         </div>
         <p class="privacy-note" id="voiceModeNote">एक महिला आवाज़ पूरी narration बोलेगी।</p>
+        <div class="panel-heading"><h2>Scene visuals</h2><span class="panel-kicker">AI IMAGE · 9:16</span></div>
+        <p class="scene-image-note" id="imageGenerationNote">AI image generation अभी बंद है। यह paid API है; इसे local .env से opt-in करके ही चालू करें।</p>
+        <div class="modal-actions">
+          <button class="secondary-btn" id="generateImagesBtn" type="button" disabled>Generate AI Scene Images (Paid)</button>
+        </div>
+        <div id="sceneImageGallery" class="scene-image-grid"></div>
         <div class="panel-heading"><h2>Scene-by-scene slide plan</h2><span class="panel-kicker">9:16 VERTICAL</span></div>
         <div id="scriptScenes" class="script-scenes">
           <p class="panel-kicker">अभी script generate नहीं हुई है।</p>
@@ -555,6 +567,7 @@
   let activeScriptData = null;
   let currentVideoUrl = null;
   let currentSubtitleUrl = null;
+  let imageGenerationEnabled = false;
 
   function setStudioStatus(text, isError = false) {
     studioStatus.textContent = text;
@@ -576,6 +589,81 @@
       </article>`).join("");
   }
 
+  function renderSceneImageGallery(images = []) {
+    const gallery = document.getElementById("sceneImageGallery");
+    gallery.replaceChildren();
+    const sorted = [...images].sort((a, b) => a.sceneIndex - b.sceneIndex);
+    for (const item of sorted) {
+      const card = document.createElement("div");
+      card.className = "scene-image-card";
+      const image = document.createElement("img");
+      image.loading = "lazy";
+      image.alt = "Generated visual for scene " + (Number(item.sceneIndex) + 1);
+      image.src = item.url + "?v=" + encodeURIComponent(item.generatedAt || "");
+      const label = document.createElement("small");
+      label.textContent = "Scene " + (Number(item.sceneIndex) + 1) + " · AI generated";
+      card.append(image, label);
+      gallery.append(card);
+    }
+  }
+
+  async function refreshImageGenerationStatus() {
+    const note = document.getElementById("imageGenerationNote");
+    const button = document.getElementById("generateImagesBtn");
+    try {
+      const response = await fetch("/api/health");
+      const health = await response.json();
+      imageGenerationEnabled = response.ok && health.imageGenerationEnabled === true;
+      if (imageGenerationEnabled) {
+        note.textContent = "Paid image generation enabled · " + (health.imageModel || "Gemini Image") + " · approx. US$0.0336 per 1K image. Generation starts only when you press the button.";
+      } else {
+        note.textContent = "AI image generation अभी बंद है। कोई image API call या charge नहीं होगा। जब तैयार हों, local .env में GEMINI_IMAGE_ENABLED=true करें और server restart करें।";
+      }
+    } catch {
+      imageGenerationEnabled = false;
+      note.textContent = "Image generation status check नहीं हो पाया। Paid generation बंद रहेगी।";
+    }
+    button.disabled = !imageGenerationEnabled || !activeScriptData;
+    button.textContent = imageGenerationEnabled ? "Generate / Refresh AI Scene Images (Paid)" : "AI Scene Images · OFF";
+  }
+
+  async function generateSceneImages() {
+    if (!activeJobId || !activeScriptData) return;
+    if (!imageGenerationEnabled) {
+      setStudioStatus("Paid image generation अभी बंद है। .env setting enable करने के बाद server restart करें।", true);
+      return;
+    }
+    const existing = Array.isArray(activeJob?.sceneImages) ? activeJob.sceneImages : [];
+    const force = existing.length >= (activeScriptData.scenes || []).length;
+    const warning = force
+      ? "तीनों scene images को दोबारा generate करने पर लगभग US$0.10 तक image charge हो सकता है। क्या आगे बढ़ें?"
+      : "यह up to 3 scene images generate करेगा। Google API पर लगभग US$0.0336 प्रति 1K image charge हो सकता है। क्या आगे बढ़ें?";
+    if (!window.confirm(warning)) return;
+
+    const button = document.getElementById("generateImagesBtn");
+    button.disabled = true;
+    button.textContent = "Generating images…";
+    setStudioStatus("Gemini हर scene के लिए अलग 9:16 image बना रहा है…");
+    try {
+      const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/generate-scene-images", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Scene images generate नहीं हो पाईं।");
+      activeJob = result.job;
+      await loadJobs();
+      displayScript(activeJob);
+      setStudioStatus((result.sceneImages || []).length + " scene images तैयार हैं। अब Create Slide Video दबाएँ।");
+    } catch (error) {
+      setStudioStatus(error.message || "Scene images generate नहीं हो पाईं।", true);
+    } finally {
+      button.disabled = !imageGenerationEnabled;
+      button.textContent = imageGenerationEnabled ? "Generate / Refresh AI Scene Images (Paid)" : "AI Scene Images · OFF";
+    }
+  }
+
   function displayScript(job) {
     activeJob = job;
     activeScriptData = job.scriptData || null;
@@ -584,6 +672,9 @@
     document.getElementById("scriptHook").value = activeScriptData?.hook || "";
     document.getElementById("voiceoverText").value = activeScriptData?.voiceover || job.script || "";
     document.getElementById("scriptCta").value = activeScriptData?.cta || "";
+    renderSceneImageGallery(job.sceneImages || []);
+    document.getElementById("generateImagesBtn").disabled = !imageGenerationEnabled || !activeScriptData;
+    document.getElementById("generateImagesBtn").textContent = imageGenerationEnabled ? "Generate / Refresh AI Scene Images (Paid)" : "AI Scene Images · OFF";
     document.getElementById("voiceMode").value = job.voiceMode || "female";
     document.getElementById("femaleVoice").value = job.femaleVoice || "Kore";
     document.getElementById("maleVoice").value = job.maleVoice || "Orus";
@@ -857,10 +948,21 @@
           duration: contentSec * (Math.max(1, Number(scene.duration_sec || 5)) / totalWeight),
           title: "SCENE " + String(index + 1).padStart(2, "0"),
           body: scene.subtitle || scene.dialogue || "",
-          visual: scene.visual_direction || ""
+          visual: scene.visual_direction || "",
+          imageUrl: (activeJob.sceneImages || []).find(image => image.sceneIndex === index)?.url || ""
         });
       });
       slides.push({ type: "outro", duration: outroSec, title: "ANTARDRISHTI", body: activeScriptData.cta || "और जानने के लिए follow करें।" });
+
+      for (const slide of slides) {
+        if (!slide.imageUrl) continue;
+        slide.imageElement = await new Promise(resolve => {
+          const image = new Image();
+          image.onload = () => resolve(image);
+          image.onerror = () => resolve(null);
+          image.src = slide.imageUrl + "?v=" + Date.now();
+        });
+      }
 
       const canvasStream = canvas.captureStream(30);
       let mixedStream = canvasStream;
@@ -892,12 +994,22 @@
 
       function drawSlide(slide, slideIndex, elapsed) {
         const w = canvas.width, h = canvas.height;
-        const gradient = context.createLinearGradient(0, 0, w, h);
-        gradient.addColorStop(0, "#0d1728");
-        gradient.addColorStop(0.55, "#1a2b42");
-        gradient.addColorStop(1, "#31271e");
-        context.fillStyle = gradient;
-        context.fillRect(0, 0, w, h);
+        if (slide.imageElement) {
+          const image = slide.imageElement;
+          const scale = Math.max(w / image.width, h / image.height);
+          const imageWidth = image.width * scale;
+          const imageHeight = image.height * scale;
+          context.drawImage(image, (w - imageWidth) / 2, (h - imageHeight) / 2, imageWidth, imageHeight);
+          context.fillStyle = "rgba(8, 17, 30, 0.48)";
+          context.fillRect(0, 0, w, h);
+        } else {
+          const gradient = context.createLinearGradient(0, 0, w, h);
+          gradient.addColorStop(0, "#0d1728");
+          gradient.addColorStop(0.55, "#1a2b42");
+          gradient.addColorStop(1, "#31271e");
+          context.fillStyle = gradient;
+          context.fillRect(0, 0, w, h);
+        }
 
         context.globalAlpha = 0.23;
         context.fillStyle = "#d8ad68";
@@ -1043,6 +1155,7 @@
   document.getElementById("femaleVoice").addEventListener("change", onVoiceSettingsChanged);
   document.getElementById("maleVoice").addEventListener("change", onVoiceSettingsChanged);
   document.getElementById("generateVoiceBtn").addEventListener("click", generateHindiVoice);
+  document.getElementById("generateImagesBtn").addEventListener("click", generateSceneImages);
   document.getElementById("renderVideoBtn").addEventListener("click", createSlideVideo);
 
   document.getElementById("briefForm").addEventListener("submit", async event => {
@@ -1144,6 +1257,7 @@
     month: "long", year: "numeric"
   }).format(new Date()).toUpperCase() + " PLAN";
 
+  refreshImageGenerationStatus();
   loadJobs().catch(error => {
     jobsBody.innerHTML = "";
     emptyState.hidden = false;
