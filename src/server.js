@@ -83,6 +83,35 @@ function getModelText(payload) {
   return parts.join("\n").trim();
 }
 
+function devanagariIssues(scriptData) {
+  const audienceText = [
+    ["title", scriptData.title],
+    ["hook", scriptData.hook],
+    ["voiceover", scriptData.voiceover],
+    ["cta", scriptData.cta],
+    ...(scriptData.scenes || []).flatMap((scene, index) => [
+      ["scene " + (index + 1) + " dialogue", scene.dialogue],
+      ["scene " + (index + 1) + " subtitle", scene.subtitle]
+    ])
+  ];
+
+  const acronymPattern = /\\b(?:AI|PLR|CTA|MP4|SEO|TTS|API|USA|TV|OK|FAQ)\\b/g;
+  const issues = [];
+  for (const [label, value] of audienceText) {
+    if (typeof value !== "string" || !value.trim()) {
+      issues.push(label + " is empty");
+      continue;
+    }
+    const withoutAcronyms = value.replace(acronymPattern, "");
+    const letters = withoutAcronyms.match(/\\p{L}/gu) || [];
+    if (letters.length < 8) continue;
+    const devanagari = withoutAcronyms.match(/\\p{Script=Devanagari}/gu) || [];
+    const ratio = devanagari.length / letters.length;
+    if (ratio < 0.58) issues.push(label + " is not predominantly Devanagari Hindi");
+  }
+  return issues;
+}
+
 function apiError(status, payload) {
   const message = typeof payload?.error?.message === "string" ? payload.error.message : "";
   if (status === 401 || status === 403) return "Gemini API key या project permission सही नहीं है। अपनी local .env file में key जाँचें।";
@@ -222,6 +251,7 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
     "",
     "VIDEO BRIEF",
     "Topic: " + job.topic,
+    "If the topic is typed in Roman Hindi, understand it and rewrite all audience-facing text in Devanagari Hindi.",
     "Duration: " + job.duration + " seconds",
     "Format: " + job.format,
     "Aspect ratio: vertical 9:16",
@@ -246,6 +276,7 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
     "- Do not ask viewers to stop medication or treatment.",
     "- Keep the content educational, careful and non-coercive.",
     "",
+    "Before returning, check every audience-facing field. Hindi words must be in Devanagari, never Roman letters.",
     "Return only JSON matching the supplied schema."
   ].join("\n");
 
@@ -265,6 +296,44 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
 
     if (!scriptData.title || !scriptData.voiceover || !Array.isArray(scriptData.scenes) || !scriptData.scenes.length) {
       return res.status(502).json({ error: "Gemini script में जरूरी scene या voiceover fields नहीं मिले। Regenerate करें।" });
+    }
+
+    let languageIssues = devanagariIssues(scriptData);
+    if (languageIssues.length) {
+      // One short correction pass: keep the visual directions but rewrite all viewer-facing
+      // Hindi copy into Devanagari before saving or showing it in the dashboard.
+      const correction = await callGemini({
+        model: GEMINI_TEXT_MODEL,
+        input: [
+          "Correct this video script. Its Hindi has been written in Roman letters.",
+          "Rewrite title, hook, voiceover, every scene dialogue, every subtitle and CTA in natural Hindi using Devanagari script.",
+          "Never use Roman Hindi. Common English words and acronyms may remain, but keep English below 10 percent.",
+          "Keep visual_direction in English. Preserve the topic and meaning. Keep the selected duration and exactly 3 scenes.",
+          "Return JSON only, following this schema: " + JSON.stringify(schema),
+          "SCRIPT TO CORRECT:",
+          JSON.stringify(scriptData)
+        ].join("\\n"),
+        response_format: { type: "text", mime_type: "application/json", schema },
+        generation_config: { max_output_tokens: 1400 }
+      });
+      const correctedText = getModelText(correction);
+      try {
+        const corrected = JSON.parse(correctedText);
+        if (corrected?.title && corrected?.voiceover && Array.isArray(corrected.scenes)) {
+          const correctedIssues = devanagariIssues(corrected);
+          if (!correctedIssues.length) scriptData = corrected;
+          else languageIssues = correctedIssues;
+        }
+      } catch {
+        // Keep the original validation issues and do not store uncorrected Roman Hindi.
+      }
+    }
+
+    languageIssues = devanagariIssues(scriptData);
+    if (languageIssues.length) {
+      return res.status(422).json({
+        error: "Script में कुछ Hindi text अभी भी Roman letters में है। Generate Script फिर दबाएँ। प्रभावित हिस्से: " + languageIssues.slice(0, 4).join(", ")
+      });
     }
 
     job.scriptData = scriptData;
