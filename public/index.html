@@ -587,6 +587,7 @@
   let imageGenerationEnabled = false;
   let brandLogoImage = null;
   let brandLogoMeta = null;
+  let brandLogoLoadPromise = Promise.resolve(false);
 
   function setStudioStatus(text, isError = false) {
     studioStatus.textContent = text;
@@ -620,7 +621,8 @@
       removeButton.hidden = true;
       brandLogoImage = null;
       brandLogoMeta = null;
-      return;
+      brandLogoLoadPromise = Promise.resolve(false);
+      return brandLogoLoadPromise;
     }
 
     const image = document.createElement("img");
@@ -632,9 +634,18 @@
     removeButton.hidden = false;
 
     const canvasLogo = new Image();
-    canvasLogo.onload = () => { brandLogoImage = canvasLogo; };
-    canvasLogo.onerror = () => { brandLogoImage = null; };
-    canvasLogo.src = image.src;
+    brandLogoLoadPromise = new Promise(resolve => {
+      canvasLogo.onload = () => {
+        brandLogoImage = canvasLogo;
+        resolve(true);
+      };
+      canvasLogo.onerror = () => {
+        brandLogoImage = null;
+        resolve(false);
+      };
+      canvasLogo.src = image.src;
+    });
+    return brandLogoLoadPromise;
   }
 
   async function loadBrandLogo() {
@@ -1209,7 +1220,8 @@
         });
       }
 
-      if (!brandLogoImage) await loadBrandLogo();
+      if (!brandLogoMeta) await loadBrandLogo();
+      if (brandLogoMeta) await brandLogoLoadPromise;
 
       const canvasStream = canvas.captureStream(30);
       let mixedStream = canvasStream;
