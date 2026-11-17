@@ -35,7 +35,7 @@ const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || "";
 const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN || "";
 const CLOUDFLARE_IMAGE_MODEL = process.env.CLOUDFLARE_IMAGE_MODEL || "@cf/black-forest-labs/flux-1-schnell";
 const CLOUDFLARE_IMAGE_STEPS = Math.max(1, Math.min(4, Number(process.env.CLOUDFLARE_IMAGE_STEPS || 4)));
-const CLOUDFLARE_IMAGE_DAILY_LIMIT = 150;
+const CLOUDFLARE_IMAGE_DAILY_LIMIT = 100;
 const IMAGE_USAGE_FILE = path.join(DATA_DIR, "cloudflare-image-usage.json");
 const CLOUDFLARE_IMAGE_ENABLED = process.env.CLOUDFLARE_IMAGE_ENABLED === "true" &&
   Boolean(CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN);
