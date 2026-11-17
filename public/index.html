@@ -431,9 +431,13 @@
 
   document.getElementById("briefForm").addEventListener("submit", async event => {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const topic = String(form.get("topic") || "").trim();
+
+    // Keep a direct reference: event.currentTarget becomes null after an await.
+    const formElement = event.currentTarget;
+    const formData = new FormData(formElement);
+    const topic = String(formData.get("topic") || "").trim();
     if (!topic) return;
+
     setMessage("Saving video brief…");
     try {
       const response = await fetch("/api/jobs", {
@@ -441,13 +445,14 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           topic,
-          format: form.get("format"),
-          duration: Number(form.get("duration"))
+          format: formData.get("format"),
+          duration: Number(formData.get("duration"))
         })
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Brief could not be saved.");
-      event.currentTarget.reset();
+
+      formElement.reset();
       setMessage("Video brief queue में add हो गया।");
       await loadJobs();
     } catch (error) {
