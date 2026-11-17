@@ -3,101 +3,496 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Antardrishti AI Video Studio</title>
+  <meta name="theme-color" content="#101827">
+  <title>Antardrishti Studio | Dashboard</title>
   <style>
-    :root { color-scheme: dark; font-family: Arial, sans-serif; }
-    body { margin: 0; background: #101827; color: #edf2f7; }
-    main { max-width: 900px; margin: 40px auto; padding: 0 20px; }
-    h1 { margin-bottom: 8px; }
-    .muted { color: #aab7c8; }
-    .panel { background: #1a2638; border: 1px solid #304158; border-radius: 12px; padding: 20px; margin: 20px 0; }
-    label { display: block; margin: 14px 0 6px; }
-    input, select, button { box-sizing: border-box; width: 100%; padding: 11px; border-radius: 7px; border: 1px solid #52647b; background: #0f1928; color: #fff; }
-    button { margin-top: 16px; background: #c29b58; border: 0; color: #172033; font-weight: 700; cursor: pointer; }
-    .job { padding: 14px 0; border-bottom: 1px solid #34445a; }
-    .job:last-child { border-bottom: 0; }
-    .tag { color: #e6c98e; font-size: 13px; }
-    #message { min-height: 20px; color: #e6c98e; }
+    :root {
+      color-scheme: dark;
+      --bg: #0d1421;
+      --panel: #151f30;
+      --panel-soft: #1b293d;
+      --line: #2a3a50;
+      --text: #edf2f8;
+      --muted: #91a0b4;
+      --gold: #d7ae69;
+      --gold-dark: #9c783f;
+      --green: #72c6a0;
+      --blue: #83b9ec;
+      --orange: #e6a66d;
+      --red: #e58e8e;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); }
+    button, input, select { font: inherit; }
+    button, a, select { -webkit-tap-highlight-color: transparent; }
+    a { color: inherit; text-decoration: none; }
+    .app { min-height: 100vh; display: grid; grid-template-columns: 248px minmax(0, 1fr); }
+    .sidebar {
+      position: sticky; top: 0; height: 100vh; padding: 28px 18px;
+      background: #111b2b; border-right: 1px solid var(--line);
+      display: flex; flex-direction: column; gap: 28px;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; padding: 0 8px; }
+    .brand-mark {
+      width: 42px; height: 42px; display: grid; place-items: center; border-radius: 13px;
+      color: #172033; background: linear-gradient(145deg, #e8c98e, #bd8d4e);
+      font-family: Georgia, serif; font-size: 21px; font-weight: 700;
+    }
+    .brand-name { font-family: Georgia, serif; font-size: 17px; letter-spacing: .2px; }
+    .brand-sub { margin-top: 3px; font-size: 10px; letter-spacing: 1.7px; color: var(--muted); text-transform: uppercase; }
+    .nav-label { padding: 0 12px; color: #718198; font-size: 10px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; }
+    .nav { display: grid; gap: 7px; }
+    .nav a { padding: 11px 12px; display: flex; align-items: center; gap: 12px; color: #aab7c9; border: 1px solid transparent; border-radius: 9px; font-size: 13px; }
+    .nav a.active, .nav a:hover { color: var(--text); background: #1b2a3e; border-color: #2d4058; }
+    .nav-icon { width: 19px; text-align: center; color: var(--gold); font-size: 16px; }
+    .side-note { margin-top: auto; padding: 15px; background: #182438; border: 1px solid var(--line); border-radius: 11px; }
+    .side-note strong { display: block; margin-bottom: 6px; font-size: 12px; }
+    .side-note p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+    .side-version { padding: 0 10px; color: #64748b; font-size: 10px; }
+    .main { min-width: 0; padding: 30px clamp(18px, 3.5vw, 48px) 48px; max-width: 1600px; width: 100%; margin: 0 auto; }
+    .topbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 34px; }
+    .crumb { color: var(--muted); font-size: 12px; }
+    .top-actions { display: flex; align-items: center; gap: 10px; }
+    .connection { display: inline-flex; align-items: center; gap: 8px; padding: 8px 11px; border-radius: 30px; border: 1px solid var(--line); color: #bdc9d8; font-size: 11px; }
+    .dot { width: 7px; height: 7px; display: inline-block; background: var(--green); border-radius: 50%; box-shadow: 0 0 0 3px #72c6a01c; }
+    .primary-btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      border: 0; border-radius: 8px; padding: 11px 15px; background: var(--gold);
+      color: #1b2432; font-size: 12px; font-weight: 750; cursor: pointer;
+    }
+    .primary-btn:hover { background: #e5c181; }
+    .page-heading { display: flex; justify-content: space-between; align-items: end; gap: 20px; margin-bottom: 23px; }
+    .eyebrow { color: var(--gold); text-transform: uppercase; letter-spacing: 2px; font-size: 10px; font-weight: 750; }
+    h1 { margin: 8px 0 7px; font-family: Georgia, "Times New Roman", serif; font-size: clamp(29px, 3vw, 39px); font-weight: 500; letter-spacing: -.6px; }
+    .subtitle { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+    .date-chip { color: #bac5d3; border: 1px solid var(--line); padding: 9px 12px; border-radius: 8px; font-size: 11px; white-space: nowrap; }
+    .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 13px; margin-bottom: 16px; }
+    .stat-card, .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+    .stat-card { padding: 17px 18px; min-height: 117px; }
+    .stat-top { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 11px; }
+    .stat-symbol { color: var(--gold); font-size: 16px; }
+    .stat-value { margin-top: 15px; font-size: 29px; letter-spacing: -.8px; font-weight: 650; }
+    .stat-foot { margin-top: 4px; color: #78899f; font-size: 10px; }
+    .overview-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(280px, .75fr); gap: 15px; margin-bottom: 16px; }
+    .panel { padding: 20px; }
+    .panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 17px; }
+    .panel-heading h2 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 18px; font-weight: 500; }
+    .panel-kicker { color: var(--muted); font-size: 10px; }
+    .target-row { display: flex; justify-content: space-between; align-items: end; gap: 15px; }
+    .target-number { font-size: 26px; font-weight: 650; }
+    .target-caption { margin-top: 4px; color: var(--muted); font-size: 11px; }
+    .target-percent { color: var(--gold); font-size: 13px; }
+    .progress-track { height: 8px; margin: 16px 0 12px; border-radius: 10px; background: #26364b; overflow: hidden; }
+    .progress-fill { height: 100%; width: 0; border-radius: inherit; background: linear-gradient(90deg, #9e7944, #e4c184); transition: width .25s ease; }
+    .target-foot { display: flex; justify-content: space-between; color: #8292a7; font-size: 10px; }
+    .pipeline { display: grid; gap: 12px; }
+    .pipeline-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 11px; }
+    .pipeline-name { display: flex; align-items: center; gap: 9px; color: #c8d2df; }
+    .pipeline-icon { color: var(--gold); width: 17px; text-align: center; }
+    .state-pending { color: #d5ad70; background: #d5ad7015; border: 1px solid #d5ad7035; padding: 4px 8px; border-radius: 20px; font-size: 9px; }
+    .create-panel { margin-bottom: 16px; }
+    .form-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(170px, .8fr) minmax(120px, .5fr) auto; align-items: end; gap: 12px; }
+    label { display: block; margin-bottom: 7px; color: #aab8ca; font-size: 10px; font-weight: 650; }
+    input, select {
+      width: 100%; min-height: 41px; padding: 10px 11px; color: var(--text);
+      background: #0f1928; border: 1px solid #34465e; border-radius: 7px; outline: none; font-size: 11px;
+    }
+    input:focus, select:focus { border-color: var(--gold-dark); box-shadow: 0 0 0 2px #d7ae6918; }
+    input::placeholder { color: #65758a; }
+    .form-grid .primary-btn { min-height: 41px; white-space: nowrap; }
+    #message { min-height: 15px; margin: 11px 0 0; color: var(--green); font-size: 10px; }
+    .queue-panel { padding: 0; overflow: hidden; }
+    .queue-head { display: flex; justify-content: space-between; align-items: center; gap: 15px; padding: 19px 20px; border-bottom: 1px solid var(--line); }
+    .queue-head h2 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 18px; font-weight: 500; }
+    .queue-tools { display: flex; align-items: center; gap: 9px; }
+    .queue-tools input { width: 190px; min-height: 35px; }
+    .queue-tools select { width: 145px; min-height: 35px; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; min-width: 760px; text-align: left; }
+    th { padding: 11px 17px; color: #78899f; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; background: #131d2c; }
+    td { padding: 13px 17px; border-top: 1px solid #243348; vertical-align: middle; font-size: 11px; }
+    tbody tr:hover { background: #1a293d; }
+    .video-title { color: #e6edf5; font-weight: 650; max-width: 270px; line-height: 1.4; }
+    .video-meta { margin-top: 4px; color: #7f90a6; font-size: 9px; }
+    .format-pill { display: inline-block; color: #b6c5d8; border: 1px solid #34465e; border-radius: 20px; padding: 5px 8px; font-size: 9px; white-space: nowrap; }
+    .status-select { min-width: 145px; min-height: 32px; padding: 6px 8px; font-size: 10px; }
+    .save-status { padding: 7px 9px; border: 1px solid #485a70; border-radius: 6px; background: #223148; color: #d9e2ee; font-size: 9px; cursor: pointer; }
+    .save-status:hover { border-color: var(--gold); }
+    .empty { padding: 35px 20px; text-align: center; color: var(--muted); font-size: 12px; }
+    .footer-note { margin: 15px 2px 0; color: #75869b; font-size: 10px; line-height: 1.7; }
+    .toast-error { color: var(--red) !important; }
+    @media (max-width: 1100px) {
+      .app { grid-template-columns: 205px minmax(0, 1fr); }
+      .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .form-grid { grid-template-columns: 1fr 1fr; }
+      .form-grid .topic-field { grid-column: 1 / -1; }
+    }
+    @media (max-width: 760px) {
+      .app { display: block; }
+      .sidebar { position: static; height: auto; padding: 14px 16px; gap: 13px; border-right: 0; border-bottom: 1px solid var(--line); }
+      .brand { padding: 0; }
+      .nav-label, .side-note, .side-version { display: none; }
+      .nav { display: flex; overflow-x: auto; gap: 5px; }
+      .nav a { flex: 0 0 auto; padding: 8px 10px; font-size: 11px; }
+      .main { padding: 20px 14px 35px; }
+      .topbar { margin-bottom: 23px; }
+      .connection { font-size: 9px; }
+      .top-actions .primary-btn { padding: 9px 10px; font-size: 10px; }
+      .page-heading { align-items: start; flex-direction: column; gap: 12px; }
+      .overview-grid { grid-template-columns: 1fr; }
+      .stats { gap: 9px; }
+      .stat-card { min-height: 103px; padding: 13px; }
+      .stat-value { font-size: 24px; }
+      .panel { padding: 15px; }
+      .form-grid { grid-template-columns: 1fr 1fr; }
+      .form-grid .topic-field { grid-column: 1 / -1; }
+      .queue-head { align-items: start; flex-direction: column; }
+      .queue-tools { width: 100%; }
+      .queue-tools input { flex: 1; width: 1px; }
+      .queue-tools select { width: 135px; }
+    }
+    @media (max-width: 420px) {
+      .stats { grid-template-columns: 1fr 1fr; }
+      .form-grid { grid-template-columns: 1fr; }
+      .form-grid .topic-field { grid-column: auto; }
+      .form-grid .primary-btn { width: 100%; }
+      .date-chip { font-size: 10px; }
+    }
   </style>
 </head>
 <body>
-<main>
-  <h1>Antardrishti AI Video Studio</h1>
-  <p class="muted">Hindi-first video production planner · 9:16 · Human approval before publishing</p>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">अ</div>
+      <div>
+        <div class="brand-name">Antardrishti</div>
+        <div class="brand-sub">AI Video Studio</div>
+      </div>
+    </div>
 
-  <section class="panel">
-    <h2>Create a video brief</h2>
-    <form id="briefForm">
-      <label for="topic">Video topic</label>
-      <input id="topic" name="topic" required maxlength="300" placeholder="उदाहरण: तनाव के समय मन को शांत कैसे करें">
-      <label for="format">Video format</label>
-      <select id="format" name="format">
-        <option value="mixed">Mixed: AI Presenter + Cinematic visuals</option>
-        <option value="presenter">AI Presenter</option>
-        <option value="cinematic">Cinematic visuals</option>
-      </select>
-      <label for="duration">Duration (seconds)</label>
-      <select id="duration" name="duration">
-        <option>30</option><option selected>45</option><option>60</option>
-      </select>
-      <button type="submit">Add to production queue</button>
-    </form>
-    <p id="message" role="status"></p>
-  </section>
+    <div>
+      <div class="nav-label">Workspace</div>
+      <nav class="nav" aria-label="Main navigation">
+        <a class="active" href="#overview"><span class="nav-icon">◫</span>Overview</a>
+        <a href="#queue"><span class="nav-icon">▤</span>Production Queue</a>
+        <a href="#create"><span class="nav-icon">＋</span>Create Video Brief</a>
+      </nav>
+    </div>
 
-  <section class="panel">
-    <h2>Production queue</h2>
-    <div id="jobs" class="muted">Loading…</div>
-  </section>
+    <div class="side-note">
+      <strong>Production goal</strong>
+      <p>30 Reels per month<br>Hindi-first · 9:16 vertical<br>Manual approval before publishing</p>
+    </div>
+    <div class="side-version">ANTARDRISHTI STUDIO · VERSION 0.2</div>
+  </aside>
 
-  <p class="muted">Current version manages briefs only. AI scripts, presenter, voice, cinematic clips, subtitles and MP4 rendering will be added in later stages.</p>
-</main>
+  <main class="main">
+    <header class="topbar">
+      <div class="crumb">Workspace&nbsp; / &nbsp;Dashboard</div>
+      <div class="top-actions">
+        <span class="connection"><span class="dot"></span>Local workspace</span>
+        <a class="primary-btn" href="#create">＋ New video brief</a>
+      </div>
+    </header>
+
+    <section id="overview">
+      <div class="page-heading">
+        <div>
+          <div class="eyebrow">Your content workspace</div>
+          <h1>Video Production Dashboard</h1>
+          <p class="subtitle">नमस्ते! यहाँ से अपने Hypnotherapy और PLR videos की planning और progress track करें।</p>
+        </div>
+        <div class="date-chip" id="todayDate">Today</div>
+      </div>
+
+      <div class="stats">
+        <article class="stat-card">
+          <div class="stat-top"><span>Total video briefs</span><span class="stat-symbol">▤</span></div>
+          <div class="stat-value" id="totalCount">0</div>
+          <div class="stat-foot">All videos in your workspace</div>
+        </article>
+        <article class="stat-card">
+          <div class="stat-top"><span>In production</span><span class="stat-symbol">◷</span></div>
+          <div class="stat-value" id="productionCount">0</div>
+          <div class="stat-foot">Currently being prepared</div>
+        </article>
+        <article class="stat-card">
+          <div class="stat-top"><span>Needs review</span><span class="stat-symbol">◎</span></div>
+          <div class="stat-value" id="reviewCount">0</div>
+          <div class="stat-foot">Waiting for your check</div>
+        </article>
+        <article class="stat-card">
+          <div class="stat-top"><span>Approved</span><span class="stat-symbol">✓</span></div>
+          <div class="stat-value" id="approvedCount">0</div>
+          <div class="stat-foot">Approved for export</div>
+        </article>
+      </div>
+
+      <div class="overview-grid">
+        <section class="panel">
+          <div class="panel-heading">
+            <h2>Monthly production target</h2>
+            <span class="panel-kicker">NOVEMBER PLAN</span>
+          </div>
+          <div class="target-row">
+            <div>
+              <div class="target-number"><span id="monthCount">0</span> <span style="color:#8392a6;font-size:14px;font-weight:400">/ 30 videos</span></div>
+              <div class="target-caption">Briefs added this month</div>
+            </div>
+            <div class="target-percent" id="targetPercent">0%</div>
+          </div>
+          <div class="progress-track"><div class="progress-fill" id="targetProgress"></div></div>
+          <div class="target-foot"><span>Monthly target: 30 videos</span><span id="remainingCount">30 remaining</span></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <h2>Studio setup</h2>
+            <span class="panel-kicker">BUILD STATUS</span>
+          </div>
+          <div class="pipeline">
+            <div class="pipeline-item"><span class="pipeline-name"><span class="pipeline-icon">✎</span>AI Hindi script generation</span><span class="state-pending">Next phase</span></div>
+            <div class="pipeline-item"><span class="pipeline-name"><span class="pipeline-icon">◉</span>AI presenter / avatar</span><span class="state-pending">Not connected</span></div>
+            <div class="pipeline-item"><span class="pipeline-name"><span class="pipeline-icon">▧</span>Cinematic video generation</span><span class="state-pending">Not connected</span></div>
+            <div class="pipeline-item"><span class="pipeline-name"><span class="pipeline-icon">♫</span>Hindi voice + subtitles</span><span class="state-pending">Not connected</span></div>
+            <div class="pipeline-item"><span class="pipeline-name"><span class="pipeline-icon">▶</span>MP4 render + export</span><span class="state-pending">Not connected</span></div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section class="panel create-panel" id="create">
+      <div class="panel-heading">
+        <h2>Create a new video brief</h2>
+        <span class="panel-kicker">STEP 1 · CONTENT PLANNING</span>
+      </div>
+      <form id="briefForm">
+        <div class="form-grid">
+          <div class="topic-field">
+            <label for="topic">VIDEO TOPIC</label>
+            <input id="topic" name="topic" required maxlength="300" placeholder="उदाहरण: तनाव के समय मन को शांत कैसे करें">
+          </div>
+          <div>
+            <label for="format">VIDEO FORMAT</label>
+            <select id="format" name="format">
+              <option value="mixed">Mixed: Presenter + Cinematic</option>
+              <option value="presenter">AI Presenter</option>
+              <option value="cinematic">Cinematic visuals</option>
+            </select>
+          </div>
+          <div>
+            <label for="duration">DURATION</label>
+            <select id="duration" name="duration">
+              <option value="30">30 seconds</option>
+              <option value="45" selected>45 seconds</option>
+              <option value="60">60 seconds</option>
+            </select>
+          </div>
+          <button class="primary-btn" type="submit">＋ Add to queue</button>
+        </div>
+        <p id="message" role="status"></p>
+      </form>
+    </section>
+
+    <section class="panel queue-panel" id="queue">
+      <div class="queue-head">
+        <div>
+          <h2>Production queue</h2>
+          <div class="panel-kicker" style="margin-top:5px">Manage each video from brief to approval</div>
+        </div>
+        <div class="queue-tools">
+          <input id="searchInput" type="search" aria-label="Search videos" placeholder="Search topics…">
+          <select id="filterStatus" aria-label="Filter by status">
+            <option value="all">All statuses</option>
+            <option value="brief_created">Brief created</option>
+            <option value="script_ready">Script ready</option>
+            <option value="in_production">In production</option>
+            <option value="review">Needs review</option>
+            <option value="approved">Approved</option>
+            <option value="exported">Exported</option>
+            <option value="published">Published</option>
+            <option value="on_hold">On hold</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Video brief</th><th>Format</th><th>Duration</th><th>Created</th><th>Current status</th><th>Update</th></tr>
+          </thead>
+          <tbody id="jobsBody"></tbody>
+        </table>
+        <div id="emptyState" class="empty">अभी queue खाली है। पहला video brief ऊपर से create करें।</div>
+      </div>
+    </section>
+
+    <p class="footer-note">यह dashboard अभी video briefs और production status manage करता है। Actual AI script, presenter, voice, cinematic clips, subtitles और MP4 rendering अगले development चरण में जोड़े जाएँगे। Final publishing से पहले आपकी approval रहेगी।</p>
+  </main>
+</div>
+
 <script>
-  const jobsEl = document.getElementById("jobs");
+  const jobsBody = document.getElementById("jobsBody");
+  const emptyState = document.getElementById("emptyState");
   const messageEl = document.getElementById("message");
+  const searchInput = document.getElementById("searchInput");
+  const filterStatus = document.getElementById("filterStatus");
+  let jobs = [];
+
+  const statusOptions = [
+    ["brief_created", "Brief created"],
+    ["script_ready", "Script ready"],
+    ["in_production", "In production"],
+    ["review", "Needs review"],
+    ["approved", "Approved"],
+    ["exported", "Exported"],
+    ["published", "Published"],
+    ["on_hold", "On hold"]
+  ];
+  const statusLabels = Object.fromEntries(statusOptions);
 
   function escapeHtml(value) {
-    return String(value).replace(/[&<>"']/g, char => ({
+    return String(value ?? "").replace(/[&<>"']/g, char => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
     })[char]);
   }
 
+  function formatDate(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "—";
+    return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(date);
+  }
+
+  function setMessage(text, isError = false) {
+    messageEl.textContent = text;
+    messageEl.classList.toggle("toast-error", isError);
+  }
+
+  function renderStats() {
+    const count = jobs.length;
+    const production = jobs.filter(job => job.status === "in_production").length;
+    const review = jobs.filter(job => job.status === "review").length;
+    const approved = jobs.filter(job => ["approved", "exported", "published"].includes(job.status)).length;
+    const now = new Date();
+    const monthCount = jobs.filter(job => {
+      const created = new Date(job.createdAt);
+      return !Number.isNaN(created.getTime()) && created.getMonth() === now.getMonth() && created.getFullYear() === now.getFullYear();
+    }).length;
+    const percent = Math.min(100, Math.round((monthCount / 30) * 100));
+
+    document.getElementById("totalCount").textContent = count;
+    document.getElementById("productionCount").textContent = production;
+    document.getElementById("reviewCount").textContent = review;
+    document.getElementById("approvedCount").textContent = approved;
+    document.getElementById("monthCount").textContent = monthCount;
+    document.getElementById("targetPercent").textContent = percent + "%";
+    document.getElementById("targetProgress").style.width = percent + "%";
+    document.getElementById("remainingCount").textContent = Math.max(0, 30 - monthCount) + " remaining";
+  }
+
+  function renderQueue() {
+    const query = searchInput.value.trim().toLowerCase();
+    const status = filterStatus.value;
+    const visibleJobs = jobs.filter(job => {
+      const matchesText = String(job.topic || "").toLowerCase().includes(query);
+      const matchesStatus = status === "all" || job.status === status;
+      return matchesText && matchesStatus;
+    });
+
+    emptyState.hidden = visibleJobs.length > 0;
+    emptyState.textContent = jobs.length === 0
+      ? "अभी queue खाली है। पहला video brief ऊपर से create करें।"
+      : "इस search या filter से कोई video नहीं मिला।";
+    jobsBody.innerHTML = visibleJobs.map(job => {
+      const options = statusOptions.map(([value, label]) =>
+        '<option value="' + value + '"' + (job.status === value ? " selected" : "") + ">" + label + "</option>"
+      ).join("");
+      const formatLabel = job.format === "presenter" ? "AI Presenter" : job.format === "cinematic" ? "Cinematic" : "Mixed";
+      return `
+        <tr data-job-id="${escapeHtml(job.id)}">
+          <td><div class="video-title">${escapeHtml(job.topic)}</div><div class="video-meta">Hindi 90% · English 10% · 9:16 vertical</div></td>
+          <td><span class="format-pill">${formatLabel}</span></td>
+          <td>${escapeHtml(job.duration)} sec</td>
+          <td>${formatDate(job.createdAt)}</td>
+          <td><select class="status-select" aria-label="Status for ${escapeHtml(job.topic)}">${options}</select></td>
+          <td><button class="save-status" type="button">Save</button></td>
+        </tr>`;
+    }).join("");
+  }
+
   async function loadJobs() {
     const response = await fetch("/api/jobs");
-    if (!response.ok) throw new Error("Could not load queue");
-    const jobs = await response.json();
-    jobsEl.innerHTML = jobs.length ? jobs.map(job => `
-      <article class="job">
-        <strong>${escapeHtml(job.topic)}</strong>
-        <div class="tag">${escapeHtml(job.format)} · ${job.duration}s · ${escapeHtml(job.status)}</div>
-        <div class="muted">Hindi 90% / English 10% · 9:16 · Approval required</div>
-      </article>`).join("") : "No videos in the queue yet.";
+    if (!response.ok) throw new Error("Queue could not be loaded.");
+    jobs = await response.json();
+    renderStats();
+    renderQueue();
   }
 
   document.getElementById("briefForm").addEventListener("submit", async event => {
     event.preventDefault();
-    messageEl.textContent = "Saving…";
     const form = new FormData(event.currentTarget);
-    const response = await fetch("/api/jobs", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        topic: form.get("topic"),
-        format: form.get("format"),
-        duration: Number(form.get("duration"))
-      })
-    });
-    const result = await response.json();
-    if (!response.ok) {
-      messageEl.textContent = result.error || "Could not save brief.";
-      return;
+    const topic = String(form.get("topic") || "").trim();
+    if (!topic) return;
+    setMessage("Saving video brief…");
+    try {
+      const response = await fetch("/api/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topic,
+          format: form.get("format"),
+          duration: Number(form.get("duration"))
+        })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Brief could not be saved.");
+      event.currentTarget.reset();
+      setMessage("Video brief queue में add हो गया।");
+      await loadJobs();
+    } catch (error) {
+      setMessage(error.message || "Something went wrong.", true);
     }
-    event.currentTarget.reset();
-    messageEl.textContent = "Video brief added to the queue.";
-    await loadJobs();
   });
 
-  loadJobs().catch(() => { jobsEl.textContent = "Could not connect to the local server."; });
+  jobsBody.addEventListener("click", async event => {
+    const button = event.target.closest(".save-status");
+    if (!button) return;
+    const row = button.closest("tr");
+    const id = row?.dataset.jobId;
+    const select = row?.querySelector(".status-select");
+    if (!id || !select) return;
+    button.disabled = true;
+    button.textContent = "Saving…";
+    try {
+      const response = await fetch("/api/jobs/" + encodeURIComponent(id), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: select.value })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Status could not be updated.");
+      await loadJobs();
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = "Retry";
+      setMessage(error.message || "Status update failed.", true);
+    }
+  });
+
+  searchInput.addEventListener("input", renderQueue);
+  filterStatus.addEventListener("change", renderQueue);
+
+  document.getElementById("todayDate").textContent = new Intl.DateTimeFormat("en-IN", {
+    weekday: "short", day: "2-digit", month: "short", year: "numeric"
+  }).format(new Date());
+
+  loadJobs().catch(error => {
+    jobsBody.innerHTML = "";
+    emptyState.hidden = false;
+    emptyState.textContent = "Dashboard server से connect नहीं हो पाया। पहले npm start चलाएँ।";
+    setMessage(error.message || "Connection error", true);
+  });
 </script>
 </body>
 </html>
