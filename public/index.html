@@ -439,6 +439,7 @@
         <div class="video-result" id="videoResult">
           <video id="videoPreview" controls playsinline></video>
           <a id="videoDownload" href="#" download>Download video</a>
+          <a id="subtitleDownload" href="#" download>Download Hindi subtitles (.srt)</a>
         </div>
         <p class="privacy-note">Free-tier AI requests are sent to Google. Do not include client names, private therapy notes or other sensitive personal information. Generated scripts need your review before publication.</p>
       </div>
@@ -553,6 +554,7 @@
   let activeJob = null;
   let activeScriptData = null;
   let currentVideoUrl = null;
+  let currentSubtitleUrl = null;
 
   function setStudioStatus(text, isError = false) {
     studioStatus.textContent = text;
@@ -784,6 +786,33 @@
     return lines.length;
   }
 
+  function formatSrtTime(seconds) {
+    const totalMs = Math.max(0, Math.round(seconds * 1000));
+    const hours = Math.floor(totalMs / 3600000);
+    const minutes = Math.floor((totalMs % 3600000) / 60000);
+    const wholeSeconds = Math.floor((totalMs % 60000) / 1000);
+    const milliseconds = totalMs % 1000;
+    return [hours, minutes, wholeSeconds].map(value => String(value).padStart(2, "0")).join(":") +
+      "," + String(milliseconds).padStart(3, "0");
+  }
+
+  function buildSrt(slides) {
+    let cursor = 0;
+    const entries = [];
+    for (const slide of slides) {
+      const text = String(slide.body || "").trim();
+      if (text) {
+        entries.push(
+          String(entries.length + 1) + "\\n" +
+          formatSrtTime(cursor) + " --> " + formatSrtTime(cursor + slide.duration) + "\\n" +
+          text
+        );
+      }
+      cursor += slide.duration;
+    }
+    return entries.join("\\n\\n") + "\\n";
+  }
+
   async function createSlideVideo() {
     if (!activeJob || !activeScriptData) {
       setStudioStatus("पहले script generate करें।", true);
@@ -919,9 +948,19 @@
           context.fillStyle = "#f5f1e9";
           context.font = "600 58px Arial, 'Noto Sans Devanagari', sans-serif";
           wrapCanvasText(context, slide.body, 78, 730, 900, 84, 6);
+          context.save();
+          context.globalAlpha = 0.18;
+          context.strokeStyle = "#d8b576";
+          context.lineWidth = 3;
+          for (let ring = 0; ring < 4; ring++) {
+            context.beginPath();
+            context.arc(850, 1320, 90 + ring * 62 + Math.sin(elapsed * 0.35 + ring) * 8, 0, Math.PI * 2);
+            context.stroke();
+          }
+          context.restore();
           context.fillStyle = "#aab9cb";
-          context.font = "28px Arial, 'Noto Sans Devanagari', sans-serif";
-          wrapCanvasText(context, slide.visual, 80, 1390, 900, 42, 4);
+          context.font = "26px Arial, sans-serif";
+          context.fillText("REFLECTION  ·  AWARENESS  ·  GROWTH", 78, 1510);
         }
 
         context.fillStyle = "#b5c0cf";
@@ -973,8 +1012,17 @@
       download.href = currentVideoUrl;
       download.download = "antardrishti-" + activeJob.id.slice(0, 8) + "." + extension;
       download.textContent = "Download " + extension.toUpperCase() + " video (" + Math.round(blob.size / 1024 / 1024 * 10) / 10 + " MB)";
+
+      if (currentSubtitleUrl) URL.revokeObjectURL(currentSubtitleUrl);
+      const subtitleBlob = new Blob([buildSrt(slides)], { type: "text/plain;charset=utf-8" });
+      currentSubtitleUrl = URL.createObjectURL(subtitleBlob);
+      const subtitleDownload = document.getElementById("subtitleDownload");
+      subtitleDownload.href = currentSubtitleUrl;
+      subtitleDownload.download = "antardrishti-" + activeJob.id.slice(0, 8) + "-hi.srt";
+      subtitleDownload.textContent = "Download Hindi subtitles (.srt)";
+
       document.getElementById("videoResult").style.display = "block";
-      setStudioStatus("Slide video बन गई। Preview देखें और Download करें।" + (audioBuffer ? " Hindi voice भी जोड़ी गई है।" : " Voice के लिए पहले Generate Hindi Voice दबाएँ।"));
+      setStudioStatus("Slide video और Hindi subtitle file तैयार हैं। Video preview करें, फिर दोनों files download करें." + (audioBuffer ? " Hindi voice भी जोड़ी गई है।" : " Voice जोड़ने के लिए पहले Generate Hindi Voice दबाएँ।"));
       if (audioContext) await audioContext.close();
     } catch (error) {
       setStudioStatus(error.message || "Video render नहीं हो पाया।", true);
