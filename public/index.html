@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Antardrishti AI Video Studio</title>
+  <style>
+    :root { color-scheme: dark; font-family: Arial, sans-serif; }
+    body { margin: 0; background: #101827; color: #edf2f7; }
+    main { max-width: 900px; margin: 40px auto; padding: 0 20px; }
+    h1 { margin-bottom: 8px; }
+    .muted { color: #aab7c8; }
+    .panel { background: #1a2638; border: 1px solid #304158; border-radius: 12px; padding: 20px; margin: 20px 0; }
+    label { display: block; margin: 14px 0 6px; }
+    input, select, button { box-sizing: border-box; width: 100%; padding: 11px; border-radius: 7px; border: 1px solid #52647b; background: #0f1928; color: #fff; }
+    button { margin-top: 16px; background: #c29b58; border: 0; color: #172033; font-weight: 700; cursor: pointer; }
+    .job { padding: 14px 0; border-bottom: 1px solid #34445a; }
+    .job:last-child { border-bottom: 0; }
+    .tag { color: #e6c98e; font-size: 13px; }
+    #message { min-height: 20px; color: #e6c98e; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Antardrishti AI Video Studio</h1>
+  <p class="muted">Hindi-first video production planner · 9:16 · Human approval before publishing</p>
+
+  <section class="panel">
+    <h2>Create a video brief</h2>
+    <form id="briefForm">
+      <label for="topic">Video topic</label>
+      <input id="topic" name="topic" required maxlength="300" placeholder="उदाहरण: तनाव के समय मन को शांत कैसे करें">
+      <label for="format">Video format</label>
+      <select id="format" name="format">
+        <option value="mixed">Mixed: AI Presenter + Cinematic visuals</option>
+        <option value="presenter">AI Presenter</option>
+        <option value="cinematic">Cinematic visuals</option>
+      </select>
+      <label for="duration">Duration (seconds)</label>
+      <select id="duration" name="duration">
+        <option>30</option><option selected>45</option><option>60</option>
+      </select>
+      <button type="submit">Add to production queue</button>
+    </form>
+    <p id="message" role="status"></p>
+  </section>
+
+  <section class="panel">
+    <h2>Production queue</h2>
+    <div id="jobs" class="muted">Loading…</div>
+  </section>
+
+  <p class="muted">Current version manages briefs only. AI scripts, presenter, voice, cinematic clips, subtitles and MP4 rendering will be added in later stages.</p>
+</main>
+<script>
+  const jobsEl = document.getElementById("jobs");
+  const messageEl = document.getElementById("message");
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, char => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    })[char]);
+  }
+
+  async function loadJobs() {
+    const response = await fetch("/api/jobs");
+    if (!response.ok) throw new Error("Could not load queue");
+    const jobs = await response.json();
+    jobsEl.innerHTML = jobs.length ? jobs.map(job => `
+      <article class="job">
+        <strong>${escapeHtml(job.topic)}</strong>
+        <div class="tag">${escapeHtml(job.format)} · ${job.duration}s · ${escapeHtml(job.status)}</div>
+        <div class="muted">Hindi 90% / English 10% · 9:16 · Approval required</div>
+      </article>`).join("") : "No videos in the queue yet.";
+  }
+
+  document.getElementById("briefForm").addEventListener("submit", async event => {
+    event.preventDefault();
+    messageEl.textContent = "Saving…";
+    const form = new FormData(event.currentTarget);
+    const response = await fetch("/api/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic: form.get("topic"),
+        format: form.get("format"),
+        duration: Number(form.get("duration"))
+      })
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      messageEl.textContent = result.error || "Could not save brief.";
+      return;
+    }
+    event.currentTarget.reset();
+    messageEl.textContent = "Video brief added to the queue.";
+    await loadJobs();
+  });
+
+  loadJobs().catch(() => { jobsEl.textContent = "Could not connect to the local server."; });
+</script>
+</body>
+</html>
