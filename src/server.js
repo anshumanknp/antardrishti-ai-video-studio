@@ -100,39 +100,45 @@ async function callGemini(body) {
 
   const requestedModel = body.model || GEMINI_TEXT_MODEL;
   const isTextRequest = !/tts|speech/i.test(requestedModel);
-  const fallbackModels = isTextRequest
-    ? [requestedModel, "gemini-3.7-flash", "gemini-3.8-flash", "gemini-3.6-flash"]
+  const modelsToTry = isTextRequest
+    ? ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite"]
     : [requestedModel];
-  const modelsToTry = [...new Set(fallbackModels)];
 
   let lastError = null;
   for (let index = 0; index < modelsToTry.length; index++) {
     const model = modelsToTry[index];
-    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-      body: JSON.stringify({ store: false, ...body, model }),
-      signal: AbortSignal.timeout(120000)
-    });
+    try {
+      const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+        body: JSON.stringify({ store: false, ...body, model }),
+        signal: AbortSignal.timeout(25000)
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok) return payload;
 
-    const payload = await response.json().catch(() => ({}));
-    if (response.ok) return payload;
+      const message = typeof payload?.error?.message === "string" ? payload.error.message : "";
+      const temporaryIssue = response.status === 503 &&
+        /(high demand|overload|temporarily unavailable|try again later|capacity)/i.test(message);
 
-    const message = typeof payload?.error?.message === "string" ? payload.error.message : "";
-    const looksLikeTemporaryOverload =
-      response.status === 503 &&
-      /(high demand|overload|temporarily unavailable|try again later|capacity)/i.test(message);
+      lastError = new Error(apiError(response.status, payload));
+      lastError.status = response.status === 429 ? 429 : response.status >= 500 ? 502 : response.status;
 
-    lastError = new Error(apiError(response.status, payload));
-    lastError.status = response.status === 429 ? 429 : response.status >= 500 ? 502 : response.status;
-
-    // Try the next free Flash model only for temporary capacity errors.
-    // Do not rotate models for invalid keys, quotas, billing or other errors.
-    if (!looksLikeTemporaryOverload || index === modelsToTry.length - 1) {
-      throw lastError;
+      if (!temporaryIssue || index === modelsToTry.length - 1) throw lastError;
+    } catch (error) {
+      lastError = error;
+      const timedOut = error?.name === "TimeoutError" || error?.name === "AbortError";
+      if (!timedOut || index === modelsToTry.length - 1) {
+        if (!error.status && timedOut) {
+          const timeoutError = new Error("Gemini ने 25 seconds में response नहीं दिया। कुछ देर बाद फिर कोशिश करें।");
+          timeoutError.status = 504;
+          throw timeoutError;
+        }
+        throw error;
+      }
+      // Try one alternate lightweight model after a timeout.
     }
   }
-
   throw lastError || new Error("Gemini request failed.");
 }
 
@@ -225,8 +231,8 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
     "- Warm, grounded Indian Hindi voice. Use everyday language, not stiff translated Hindi.",
     "- Make the voiceover fit the selected duration.",
     "- Write a strong hook for the first 2–3 seconds.",
-    "- Provide 4 or 5 scenes. Each scene must include a short dialogue/voiceover, practical visual direction for a slide, and one short subtitle.",
-    "- Scenes should move logically from hook to explanation to useful takeaway to CTA.",
+    "- Provide exactly 3 concise scenes. Each scene must include a short dialogue/voiceover, practical visual direction for a slide, and one short subtitle.",
+    "- Move quickly from hook to explanation to one useful takeaway and CTA.",
     "- Visual directions should describe visuals that can be composed from typography, shapes and gradients. Do not ask to draw text inside an AI image.",
     "- Use the voiceover as exact narration text. Do not include scene headings inside voiceover.",
     "",
@@ -245,7 +251,7 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
       model: GEMINI_TEXT_MODEL,
       input: prompt,
       response_format: { type: "text", mime_type: "application/json", schema },
-      generation_config: { thinking_level: "low", max_output_tokens: 3000 }
+      generation_config: { max_output_tokens: 1400 }
     });
     const text = getModelText(payload);
     if (!text) return res.status(502).json({ error: "Gemini ने खाली script response दिया।" });
