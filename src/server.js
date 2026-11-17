@@ -15,7 +15,7 @@ function loadLocalEnv() {
     if (!line || line.startsWith("#")) continue;
     const separator = line.indexOf("=");
     if (separator < 1) continue;
-    const key = line.slice(0, separator).trim();
+    const key = line.slice(0, separator).trim().replace(/^\\uFEFF/, "");
     let value = line.slice(separator + 1).trim();
     if ((value.startsWith('"') && value.endsWith('"')) ||
         (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
@@ -49,6 +49,26 @@ function writeJobs(jobs) {
   const tempFile = JOBS_FILE + ".tmp";
   fs.writeFileSync(tempFile, JSON.stringify(jobs, null, 2), "utf8");
   fs.renameSync(tempFile, JOBS_FILE);
+}
+
+function pcmToWav(pcm, sampleRate = 24000, channels = 1, bitsPerSample = 16) {
+  const header = Buffer.alloc(44);
+  const byteRate = sampleRate * channels * bitsPerSample / 8;
+  const blockAlign = channels * bitsPerSample / 8;
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
 }
 
 function getModelText(payload) {
@@ -242,23 +262,27 @@ app.post("/api/jobs/:id/generate-voice", async (req, res) => {
     const payload = await callGemini({
       model: GEMINI_TTS_MODEL,
       input: "Speak the following script in natural, warm, clear Indian Hindi. Use a calm, friendly educational narrator style, medium pace, and accurate Hindi pronunciation. Preserve the words; do not translate or add an introduction.\n\n" + narration,
-      response_format: { type: "audio", mime_type: "audio/wav", sample_rate: 24000 },
+      response_format: { type: "audio" },
       generation_config: { speech_config: [{ voice: process.env.GEMINI_TTS_VOICE || "Kore" }] }
     });
 
-    const audioData = payload?.output_audio?.data;
+    const lastModelStep = [...(payload.steps || [])].reverse().find(step => step.type === "model_output");
+    const audioBlock = [...(lastModelStep?.content || [])].reverse().find(block => block.type === "audio");
+    const audioData = payload?.output_audio?.data || audioBlock?.data;
     if (typeof audioData !== "string" || !audioData.length) {
-      return res.status(502).json({ error: "Gemini TTS ने audio file नहीं लौटाई।" });
+      return res.status(502).json({ error: "Gemini TTS ने audio data नहीं लौटाया।" });
     }
 
+    const pcm = Buffer.from(audioData, "base64");
+    const wav = pcmToWav(pcm, Number(payload?.output_audio?.sample_rate || audioBlock?.sample_rate || 24000));
     const safeFile = job.id + ".wav";
-    fs.writeFileSync(path.join(OUTPUT_DIR, safeFile), Buffer.from(audioData, "base64"));
+    fs.writeFileSync(path.join(OUTPUT_DIR, safeFile), wav);
     job.script = narration;
     if (job.scriptData) job.scriptData.voiceover = narration;
     job.voiceFile = "/outputs/" + safeFile;
     job.updatedAt = new Date().toISOString();
     writeJobs(jobs);
-    res.json({ ok: true, voiceFile: job.voiceFile, mimeType: payload.output_audio.mime_type || "audio/wav" });
+    res.json({ ok: true, voiceFile: job.voiceFile, mimeType: "audio/wav" });
   } catch (error) {
     res.status(error.status || 502).json({
       error: error.name === "TimeoutError" ? "Voice generation में समय लग गया। फिर कोशिश करें।" : error.message || "Gemini TTS से connect नहीं हो पाया।"
