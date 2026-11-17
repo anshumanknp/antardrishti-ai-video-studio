@@ -30,21 +30,34 @@ A separate, local-first workspace for planning and tracking Antardrishti short-v
 3. Keep `.env` private. It is ignored by Git; never paste the key into chat or commit it.
 4. Restart the local server with `npm start`.
 5. Add a video brief, then select **Open Studio** in the production queue.
-6. Generate the Hindi-first script, review/edit it, then generate Hindi voice.
-7. Select **Create Slide Video** to create a vertical slide-based video in the browser and download it.
+6. Generate the Hindi-first Devanagari script, review/edit it, choose a voice style, and generate the voice.
+7. Select **Create Slide Video** to make a vertical video in the browser. Download the video and the separate Hindi SRT subtitle file.
 
-The first slide-video version uses locally drawn animated backgrounds, scene text and subtitles. It does not call an image-generation API and does not create an AI presenter or cinematic footage. Image/video generation can be added later through separate provider modules; Gemini image and video models currently have no free API tier in the pricing table.
+### Voice options
 
-## API models
+The Studio provides four modes:
 
-- Script: `gemini-3.1-flash-lite` (fast lightweight free-tier default; tries `gemini-3.5-flash-lite` if the first model temporarily overloads)
-- Hindi narration: `gemini-3.1-flash-tts-preview` (TTS)
+- **Female narrator:** one selected female voice reads the full narration.
+- **Male narrator:** one selected male voice reads the full narration.
+- **Duet:** Gemini turns the narration into a short two-person Hindi dialogue. The female and male speakers alternate in one TTS generation.
+- **Blend:** the same narration is generated separately with the selected female and male voices, then mixed into one WAV track. This uses two TTS requests and can sound deliberately layered.
 
-Free-tier availability, quotas and model names can change. Check Google AI Studio usage before production use. Free-tier content may be used by Google to improve its products, so do not send private client or therapy information.
+Female voice choices: Kore, Aoede, Leda, Zephyr and Gacrux. Male voice choices: Orus, Puck, Charon, Algieba and Sadaltager. The available voice names and gender labels come from Google's Gemini TTS voice list.
 
-## Not implemented yet
+### Video and subtitles
 
-This starter does **not** yet generate AI scripts, avatars, voiceovers, cinematic clips, captions, background music, rendered MP4s, or publish to Buffer. These require selecting providers, reviewing their current APIs/pricing/terms, and configuring credentials. No API keys are included.
+The current video builder uses animated gradients, shapes, title cards and scene subtitles. It adds the generated Hindi audio and can export MP4 or WebM depending on browser support. It also creates a separate scene-timed Hindi `.srt` file for use in an editor or publishing workflow.
+
+This is a slide-based video builder. It does not yet generate AI presenter footage, realistic cinematic clips or AI-generated scene images. Visual directions stay as internal production notes and are not printed as text over the scenes.
+
+## API models and usage
+
+- Script and Duet dialogue: `gemini-3.1-flash-lite` (the server can try `gemini-3.5-flash-lite` after a temporary overload).
+- Hindi narration: `gemini-3.1-flash-tts-preview`.
+- Duet uses Gemini's two-speaker TTS configuration.
+- Blend makes two TTS requests and mixes their PCM audio into one WAV.
+
+TTS requests can take longer than script generation. Blend uses about twice the TTS generation requests of a single voice. Free-tier access, quotas and model names can change; check Google AI Studio usage before production use. Do not send private client or therapy information to the API.
 
 ## Requirements
 
@@ -60,13 +73,13 @@ This starter does **not** yet generate AI scripts, avatars, voiceovers, cinemati
 
 ## Planned implementation
 
-1. Add Hindi script generation with fact-check and safety checks.
-2. Select and connect an AI presenter/avatar provider.
-3. Select and connect a cinematic video generation provider.
-4. Add Hindi TTS, subtitles, licensed music and FFmpeg rendering.
-5. Add preview, edit, regenerate and human-approval gates.
-6. Export approved MP4s for the existing Buffer workflow.
-7. Consider direct Buffer/API integration only after provider access and permissions are confirmed.
+1. Connect an image provider for generated scene artwork, with a provider interface so the rest of the app does not depend on one vendor.
+2. Connect an AI presenter/avatar provider and support presenter shots between generated scenes.
+3. Add optional AI-generated cinematic video clips after choosing a provider and checking its pricing, limits and commercial-use terms.
+4. Improve subtitle timing beyond the current scene-level SRT and add optional caption styling.
+5. Add reliable MP4 rendering and final export checks.
+6. Keep preview, edit, regenerate and human-approval steps before publication.
+7. Export approved videos for the existing Buffer workflow. Direct publishing stays out of scope until API access and permissions are confirmed.
 
 ## Content safety
 
