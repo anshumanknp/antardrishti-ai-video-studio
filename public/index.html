@@ -1130,34 +1130,24 @@
     let cursor = 0;
     const entries = [];
     for (const slide of slides) {
-      const text = String(slide.body || "").trim();
-      if (text) {
+      const captions = Array.isArray(slide.captions) && slide.captions.length
+        ? slide.captions
+        : [String(slide.body || "").trim()].filter(Boolean);
+      const segmentDuration = captions.length ? slide.duration / captions.length : slide.duration;
+      captions.forEach((caption, index) => {
+        const text = String(caption || "").trim();
+        if (!text) return;
+        const start = cursor + index * segmentDuration;
+        const end = cursor + (index + 1) * segmentDuration;
         entries.push(
           String(entries.length + 1) + "\n" +
-          formatSrtTime(cursor) + " --> " + formatSrtTime(cursor + slide.duration) + "\n" +
+          formatSrtTime(start) + " --> " + formatSrtTime(end) + "\n" +
           text
         );
-      }
+      });
       cursor += slide.duration;
     }
     return entries.join("\n\n") + "\n";
-  }
-
-  function drawBrandLogo(context, width, height) {
-    if (!brandLogoImage || !brandLogoImage.complete || !brandLogoImage.naturalWidth) return;
-    const maxWidth = 148;
-    const maxHeight = 92;
-    const scale = Math.min(maxWidth / brandLogoImage.naturalWidth, maxHeight / brandLogoImage.naturalHeight, 1);
-    const logoWidth = brandLogoImage.naturalWidth * scale;
-    const logoHeight = brandLogoImage.naturalHeight * scale;
-    const x = width - 74 - logoWidth;
-    const y = 64;
-    context.save();
-    context.globalAlpha = 0.96;
-    context.shadowColor = "rgba(0,0,0,0.4)";
-    context.shadowBlur = 16;
-    context.drawImage(brandLogoImage, x, y, logoWidth, logoHeight);
-    context.restore();
   }
 
   async function createSlideVideo() {
@@ -1206,6 +1196,9 @@
           duration: contentSec * (Math.max(1, Number(scene.duration_sec || 5)) / totalWeight),
           title: "SCENE " + String(index + 1).padStart(2, "0"),
           body: scene.subtitle || scene.dialogue || "",
+          captions: Array.isArray(scene.subtitle_segments) && scene.subtitle_segments.length
+            ? scene.subtitle_segments
+            : [scene.subtitle || scene.dialogue || ""].filter(Boolean),
           visual: scene.visual_direction || "",
           imageUrl: (activeJob.sceneImages || []).find(image => image.sceneIndex === index)?.url || ""
         });
@@ -1336,9 +1329,16 @@
           context.font = "600 62px Arial, 'Noto Sans Devanagari', sans-serif";
           wrapCanvasText(context, slide.body, 78, 810, 900, 82, 5);
         } else {
+          const sceneCaptions = Array.isArray(slide.captions) && slide.captions.length
+            ? slide.captions : [slide.body || ""];
+          const captionIndex = Math.min(
+            sceneCaptions.length - 1,
+            Math.floor((Math.max(0, elapsed) / Math.max(0.1, slide.duration)) * sceneCaptions.length)
+          );
+          const activeCaption = sceneCaptions[captionIndex] || slide.body || "";
           context.fillStyle = "#f5f1e9";
           context.font = "600 58px Arial, 'Noto Sans Devanagari', sans-serif";
-          wrapCanvasText(context, slide.body, 78, 730, 900, 84, 6);
+          wrapCanvasText(context, activeCaption, 78, 730, 900, 84, 6);
           if (!slide.imageElement) {
             context.save();
             context.globalAlpha = 0.18;
