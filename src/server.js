@@ -263,7 +263,10 @@ function devanagariIssues(scriptData) {
     ["cta", scriptData.cta],
     ...(scriptData.scenes || []).flatMap((scene, index) => [
       ["scene " + (index + 1) + " dialogue", scene.dialogue],
-      ["scene " + (index + 1) + " subtitle", scene.subtitle]
+      ["scene " + (index + 1) + " subtitle", scene.subtitle],
+      ...((scene.subtitle_segments || []).map((caption, captionIndex) =>
+        ["scene " + (index + 1) + " caption " + (captionIndex + 1), caption]
+      ))
     ])
   ];
 
@@ -501,9 +504,14 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
             duration_sec: { type: "integer" },
             dialogue: { type: "string", description: "Presenter dialogue in Devanagari Hindi, never Roman Hindi." },
             visual_direction: { type: "string", description: "Internal visual-production prompt. English is allowed here; this text is not spoken and is not shown as a subtitle." },
-            subtitle: { type: "string", description: "Short on-screen Hindi subtitle in Devanagari script, never Roman Hindi." }
+            subtitle: { type: "string", description: "A short central idea subtitle in Devanagari Hindi." },
+            subtitle_segments: {
+              type: "array",
+              description: "Three or four short Devanagari Hindi captions, in spoken order, each ideally 3 to 7 words. Together they should cover the scene dialogue, not add new claims.",
+              items: { type: "string" }
+            }
           },
-          required: ["duration_sec", "dialogue", "visual_direction", "subtitle"]
+          required: ["duration_sec", "dialogue", "visual_direction", "subtitle", "subtitle_segments"]
         }
       },
       cta: { type: "string", description: "A short spoken call-to-action in Devanagari Hindi." },
@@ -529,7 +537,9 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
     "- Warm, grounded Indian Hindi voice. Use everyday language, not stiff translated Hindi.",
     "- Make the voiceover fit the selected duration.",
     "- Write a strong hook for the first 2–3 seconds.",
-    "- Provide exactly 3 concise scenes. Each scene must include dialogue in Devanagari Hindi, a short subtitle in Devanagari Hindi, and a practical visual direction.",
+    "- Provide exactly 3 concise scenes. Each scene must include dialogue in Devanagari Hindi, a short subtitle in Devanagari Hindi, 3 or 4 sequential subtitle_segments in Devanagari Hindi, and a practical visual direction.",
+    "- Each subtitle segment should be a natural spoken phrase of about 3–7 words. Keep the segments in the same order as the dialogue so they can appear one after another during that scene.",
+    "- Do not put Scene 1, Scene 2, Scene 3, scene numbers, headings or labels in dialogue or subtitles.",
     "- Visual directions are internal production prompts, not audience copy. They may be written in clear English so future image/video models can understand them.",
     "- Move quickly from hook to explanation to one useful takeaway and CTA.",
     "- Visual directions should describe visuals that can be composed from typography, shapes and gradients. Do not ask to draw text inside an AI image.",
@@ -648,7 +658,7 @@ app.post("/api/jobs/:id/generate-scene-images", async (req, res) => {
         "Video topic: " + safeTopic,
         "Visual description: " + (visualDirection || "Create a calm, reflective scene that matches the video topic."),
         "Visual style: photorealistic cinematic photography, tasteful composition, natural light, restrained navy and warm neutral palette, detailed environment, emotionally calm and respectful.",
-        "Composition: square image, with the main subject and all important details kept within the central vertical crop-safe area. Leave the lower third calm and uncluttered for Hindi captions to be added later by the video editor.",
+        "Composition: square image designed for a centered 9:16 crop. Keep the main subject exactly in the central 55 percent of the image width. If a person is shown, use a medium shot with the full head and face visible, centered, not cut off and not pushed to the edge. If an object is shown, show the whole object with clear margin. Leave the lower third calm and uncluttered for Hindi captions added later by the editor.",
         "IMPORTANT: The image must contain no writing at all. Do not draw words, letters, numbers, labels, signs, titles, headings, captions, subtitles, logos, watermarks, scene names, scene numbers, UI or borders.",
         "Do not write or depict the words Scene, Scene 1, Scene 2, Scene 3, or any numbered scene label.",
         "Avoid medical imagery, hospital scenes, distressed patients, diagnostic symbols, supernatural claims or frightening imagery.",
@@ -718,7 +728,8 @@ app.post("/api/jobs/:id/convert-to-devanagari", async (req, res) => {
             duration_sec: { type: "integer" },
             dialogue: { type: "string" },
             visual_direction: { type: "string" },
-            subtitle: { type: "string" }
+            subtitle: { type: "string" },
+            subtitle_segments: { type: "array", items: { type: "string" } }
           },
           required: ["duration_sec", "dialogue", "visual_direction", "subtitle"]
         }
@@ -735,7 +746,8 @@ app.post("/api/jobs/:id/convert-to-devanagari", async (req, res) => {
       input: [
         "TASK: Convert the existing Hindi video script from Roman Hindi (Hinglish typed in English letters) into proper Devanagari Hindi.",
         "This is a transliteration and natural-Hindi correction task. Preserve the exact meaning, message, tone, facts, scene order, scene durations and number of scenes. Do not summarise or invent new content.",
-        "All audience-facing fields must be written in Devanagari: title, hook, voiceover, each dialogue, each subtitle and CTA.",
+        "All audience-facing fields must be written in Devanagari: title, hook, voiceover, each dialogue, each subtitle, all subtitle_segments and CTA.",
+        "If a scene has no subtitle_segments, create 3 or 4 short sequential Devanagari captions from its dialogue. Do not add new claims."
         "Do not return Roman Hindi. Keep a few genuinely English words/acronyms only when natural, such as AI or PLR. Convert Hindi words such as man, aap, kya, jaante, shakti, pehchanein into मन, आप, क्या, जानते, शक्ति, पहचानें.",
         "Keep visual_direction exactly as supplied; it is an internal prompt and may remain in English.",
         "Return only valid JSON matching this schema: " + JSON.stringify(schema),
