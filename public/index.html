@@ -390,6 +390,39 @@
           <label for="scriptCta">CALL TO ACTION</label>
           <input id="scriptCta" maxlength="500">
         </div>
+        <div class="panel-heading"><h2>Hindi voice setup</h2><span class="panel-kicker">GEMINI TTS</span></div>
+        <div class="modal-grid voice-settings">
+          <div class="modal-field">
+            <label for="voiceMode">VOICE STYLE</label>
+            <select id="voiceMode">
+              <option value="female">Female narrator</option>
+              <option value="male">Male narrator</option>
+              <option value="duet">Duet · Male + Female, turn by turn</option>
+              <option value="mix">Blend · Male + Female together</option>
+            </select>
+          </div>
+          <div class="modal-field" id="femaleVoiceField">
+            <label for="femaleVoice">FEMALE VOICE</label>
+            <select id="femaleVoice">
+              <option value="Kore">Kore · Firm</option>
+              <option value="Aoede">Aoede · Breezy</option>
+              <option value="Leda">Leda · Youthful</option>
+              <option value="Zephyr">Zephyr · Bright</option>
+              <option value="Gacrux">Gacrux · Mature</option>
+            </select>
+          </div>
+          <div class="modal-field" id="maleVoiceField">
+            <label for="maleVoice">MALE VOICE</label>
+            <select id="maleVoice">
+              <option value="Orus">Orus · Firm</option>
+              <option value="Puck">Puck · Upbeat</option>
+              <option value="Charon">Charon · Informative</option>
+              <option value="Algieba">Algieba · Smooth</option>
+              <option value="Sadaltager">Sadaltager · Knowledgeable</option>
+            </select>
+          </div>
+        </div>
+        <p class="privacy-note" id="voiceModeNote">एक महिला आवाज़ पूरी narration बोलेगी।</p>
         <div class="panel-heading"><h2>Scene-by-scene slide plan</h2><span class="panel-kicker">9:16 VERTICAL</span></div>
         <div id="scriptScenes" class="script-scenes">
           <p class="panel-kicker">अभी script generate नहीं हुई है।</p>
@@ -549,6 +582,10 @@
     document.getElementById("scriptHook").value = activeScriptData?.hook || "";
     document.getElementById("voiceoverText").value = activeScriptData?.voiceover || job.script || "";
     document.getElementById("scriptCta").value = activeScriptData?.cta || "";
+    document.getElementById("voiceMode").value = job.voiceMode || "female";
+    document.getElementById("femaleVoice").value = job.femaleVoice || "Kore";
+    document.getElementById("maleVoice").value = job.maleVoice || "Orus";
+    refreshVoiceModeFields();
     drawSceneCards(activeScriptData?.scenes || []);
     voicePlayer.hidden = !job.voiceFile;
     if (job.voiceFile) voicePlayer.src = job.voiceFile + "?v=" + Date.now();
@@ -651,6 +688,52 @@
     }
   }
 
+  function refreshVoiceModeFields() {
+    const mode = document.getElementById("voiceMode").value;
+    const femaleField = document.getElementById("femaleVoiceField");
+    const maleField = document.getElementById("maleVoiceField");
+    femaleField.hidden = mode === "male";
+    maleField.hidden = mode === "female";
+    const note = document.getElementById("voiceModeNote");
+    const notes = {
+      female: "एक महिला आवाज़ पूरी narration बोलेगी।",
+      male: "एक पुरुष आवाज़ पूरी narration बोलेगी।",
+      duet: "महिला और पुरुष आवाज़ बारी-बारी से संवाद बोलेंगे। Gemini दो speakers को एक audio track में बनाएगा।",
+      mix: "महिला और पुरुष दोनों पूरी narration साथ बोलेंगे। दो audio generations होंगी; दोनों आवाज़ें एक WAV track में mix होंगी।"
+    };
+    note.textContent = notes[mode] || notes.female;
+  }
+
+  async function saveVoicePreferences(showStatus = false) {
+    if (!activeJobId) return;
+    const preferences = {
+      voiceMode: document.getElementById("voiceMode").value,
+      femaleVoice: document.getElementById("femaleVoice").value,
+      maleVoice: document.getElementById("maleVoice").value
+    };
+    const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(preferences)
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Voice settings save नहीं हुईं।");
+    activeJob = result;
+    const index = jobs.findIndex(item => item.id === result.id);
+    if (index >= 0) jobs[index] = result;
+    if (showStatus) setStudioStatus("Voice settings save हो गई हैं।");
+    return result;
+  }
+
+  async function onVoiceSettingsChanged() {
+    refreshVoiceModeFields();
+    try {
+      await saveVoicePreferences(true);
+    } catch (error) {
+      setStudioStatus(error.message || "Voice settings save नहीं हुईं।", true);
+    }
+  }
+
   async function generateHindiVoice() {
     if (!activeJobId) return;
     await saveScriptEdits();
@@ -662,7 +745,12 @@
       const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/generate-voice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ voiceover: document.getElementById("voiceoverText").value.trim() })
+        body: JSON.stringify({
+          voiceover: document.getElementById("voiceoverText").value.trim(),
+          voiceMode: document.getElementById("voiceMode").value,
+          femaleVoice: document.getElementById("femaleVoice").value,
+          maleVoice: document.getElementById("maleVoice").value
+        })
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Voice generation failed.");
@@ -903,6 +991,9 @@
   document.getElementById("generateScriptBtn").addEventListener("click", () => generateScript(false));
   document.getElementById("convertScriptBtn").addEventListener("click", convertCurrentScriptToDevanagari);
   document.getElementById("saveScriptBtn").addEventListener("click", saveScriptEdits);
+  document.getElementById("voiceMode").addEventListener("change", onVoiceSettingsChanged);
+  document.getElementById("femaleVoice").addEventListener("change", onVoiceSettingsChanged);
+  document.getElementById("maleVoice").addEventListener("change", onVoiceSettingsChanged);
   document.getElementById("generateVoiceBtn").addEventListener("click", generateHindiVoice);
   document.getElementById("renderVideoBtn").addEventListener("click", createSlideVideo);
 
