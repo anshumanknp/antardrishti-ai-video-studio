@@ -66,6 +66,16 @@ app.post("/api/jobs", (req, res) => {
   res.status(201).json(job);
 });
 
+app.delete("/api/jobs/:id", (req, res) => {
+  const jobs = readJobs();
+  const index = jobs.findIndex(item => item.id === req.params.id);
+  if (index === -1) return res.status(404).json({ error: "Video brief not found." });
+
+  const [deletedJob] = jobs.splice(index, 1);
+  writeJobs(jobs);
+  res.json({ ok: true, deletedId: deletedJob.id });
+});
+
 app.patch("/api/jobs/:id", (req, res) => {
   const allowed = new Set(["script", "status", "videoFile"]);
   const jobs = readJobs();
