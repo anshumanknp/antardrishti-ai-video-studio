@@ -119,6 +119,9 @@
     .status-select { min-width: 145px; min-height: 32px; padding: 6px 8px; font-size: 10px; }
     .save-status { padding: 7px 9px; border: 1px solid #485a70; border-radius: 6px; background: #223148; color: #d9e2ee; font-size: 9px; cursor: pointer; }
     .save-status:hover { border-color: var(--gold); }
+    .delete-job { padding: 7px 9px; border: 1px solid #78494f; border-radius: 6px; background: #3a222b; color: #f0b4b4; font-size: 9px; cursor: pointer; }
+    .delete-job:hover { background: #512a34; border-color: #c87979; }
+    .delete-job:disabled { opacity: .55; cursor: wait; }
     .empty { padding: 35px 20px; text-align: center; color: var(--muted); font-size: 12px; }
     .footer-note { margin: 15px 2px 0; color: #75869b; font-size: 10px; line-height: 1.7; }
     .toast-error { color: var(--red) !important; }
@@ -320,7 +323,7 @@
       <div class="table-wrap">
         <table>
           <thead>
-            <tr><th>Video brief</th><th>Format</th><th>Duration</th><th>Created</th><th>Current status</th><th>Update</th></tr>
+            <tr><th>Video brief</th><th>Format</th><th>Duration</th><th>Created</th><th>Current status</th><th>Update</th><th>Delete</th></tr>
           </thead>
           <tbody id="jobsBody"></tbody>
         </table>
@@ -417,6 +420,7 @@
           <td>${formatDate(job.createdAt)}</td>
           <td><select class="status-select" aria-label="Status for ${escapeHtml(job.topic)}">${options}</select></td>
           <td><button class="save-status" type="button">Save</button></td>
+          <td><button class="delete-job" type="button">Delete</button></td>
         </tr>`;
     }).join("");
   }
@@ -461,6 +465,31 @@
   });
 
   jobsBody.addEventListener("click", async event => {
+    const deleteButton = event.target.closest(".delete-job");
+    if (deleteButton) {
+      const deleteRow = deleteButton.closest("tr");
+      const deleteId = deleteRow?.dataset.jobId;
+      const deleteJob = jobs.find(job => job.id === deleteId);
+      if (!deleteId || !deleteJob) return;
+      const confirmed = window.confirm('क्या आप यह video brief delete करना चाहते हैं?\\n\\n' + deleteJob.topic);
+      if (!confirmed) return;
+
+      deleteButton.disabled = true;
+      deleteButton.textContent = "Deleting…";
+      try {
+        const response = await fetch("/api/jobs/" + encodeURIComponent(deleteId), { method: "DELETE" });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Video brief could not be deleted.");
+        setMessage("Video brief delete कर दिया गया।");
+        await loadJobs();
+      } catch (error) {
+        deleteButton.disabled = false;
+        deleteButton.textContent = "Retry";
+        setMessage(error.message || "Delete failed.", true);
+      }
+      return;
+    }
+
     const button = event.target.closest(".save-status");
     if (!button) return;
     const row = button.closest("tr");
