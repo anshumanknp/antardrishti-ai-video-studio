@@ -29,7 +29,7 @@ const PORT = Number(process.env.PORT || 3460);
 const DATA_DIR = path.join(__dirname, "..", "data");
 const OUTPUT_DIR = path.join(__dirname, "..", "outputs");
 const JOBS_FILE = path.join(DATA_DIR, "jobs.json");
-const GEMINI_TEXT_MODEL = process.env.GEMINI_MODEL || "gemini-3.7-flash";
+const GEMINI_TEXT_MODEL = "gemini-3.1-flash-lite";
 const GEMINI_TTS_MODEL = process.env.GEMINI_TTS_MODEL || "gemini-3.1-flash-tts-preview";
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
