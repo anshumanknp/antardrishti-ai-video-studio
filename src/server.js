@@ -29,7 +29,7 @@ const PORT = Number(process.env.PORT || 3460);
 const DATA_DIR = path.join(__dirname, "..", "data");
 const OUTPUT_DIR = path.join(__dirname, "..", "outputs");
 const JOBS_FILE = path.join(DATA_DIR, "jobs.json");
-const GEMINI_TEXT_MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
+const GEMINI_TEXT_MODEL = process.env.GEMINI_MODEL || "gemini-3.7-flash";
 const GEMINI_TTS_MODEL = process.env.GEMINI_TTS_MODEL || "gemini-3.1-flash-tts-preview";
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -97,19 +97,43 @@ async function callGemini(body) {
     error.status = 503;
     throw error;
   }
-  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-    body: JSON.stringify({ store: false, ...body }),
-    signal: AbortSignal.timeout(120000)
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(apiError(response.status, payload));
-    error.status = response.status === 429 ? 429 : response.status >= 500 ? 502 : response.status;
-    throw error;
+
+  const requestedModel = body.model || GEMINI_TEXT_MODEL;
+  const isTextRequest = !/tts|speech/i.test(requestedModel);
+  const fallbackModels = isTextRequest
+    ? [requestedModel, "gemini-3.7-flash", "gemini-3.8-flash", "gemini-3.6-flash"]
+    : [requestedModel];
+  const modelsToTry = [...new Set(fallbackModels)];
+
+  let lastError = null;
+  for (let index = 0; index < modelsToTry.length; index++) {
+    const model = modelsToTry[index];
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+      body: JSON.stringify({ store: false, ...body, model }),
+      signal: AbortSignal.timeout(120000)
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (response.ok) return payload;
+
+    const message = typeof payload?.error?.message === "string" ? payload.error.message : "";
+    const looksLikeTemporaryOverload =
+      response.status === 503 &&
+      /(high demand|overload|temporarily unavailable|try again later|capacity)/i.test(message);
+
+    lastError = new Error(apiError(response.status, payload));
+    lastError.status = response.status === 429 ? 429 : response.status >= 500 ? 502 : response.status;
+
+    // Try the next free Flash model only for temporary capacity errors.
+    // Do not rotate models for invalid keys, quotas, billing or other errors.
+    if (!looksLikeTemporaryOverload || index === modelsToTry.length - 1) {
+      throw lastError;
+    }
   }
-  return payload;
+
+  throw lastError || new Error("Gemini request failed.");
 }
 
 function findJob(id) {
