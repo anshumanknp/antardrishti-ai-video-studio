@@ -31,6 +31,8 @@ const OUTPUT_DIR = path.join(__dirname, "..", "outputs");
 const JOBS_FILE = path.join(DATA_DIR, "jobs.json");
 const GEMINI_TEXT_MODEL = "gemini-3.1-flash-lite";
 const GEMINI_TTS_MODEL = process.env.GEMINI_TTS_MODEL || "gemini-3.1-flash-tts-preview";
+const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-3.1-flash-lite-image";
+const GEMINI_IMAGE_ENABLED = process.env.GEMINI_IMAGE_ENABLED === "true";
 const FEMALE_TTS_VOICES = new Set(["Kore", "Aoede", "Leda", "Zephyr", "Gacrux"]);
 const MALE_TTS_VOICES = new Set(["Orus", "Puck", "Charon", "Algieba", "Sadaltager"]);
 const DEFAULT_FEMALE_VOICE = "Kore";
@@ -73,6 +75,49 @@ function pcmToWav(pcm, sampleRate = 24000, channels = 1, bitsPerSample = 16) {
   header.write("data", 36);
   header.writeUInt32LE(pcm.length, 40);
   return Buffer.concat([header, pcm]);
+}
+
+async function generateGeminiSceneImage(prompt) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey === "PASTE_YOUR_KEY_HERE") {
+    const error = new Error("Gemini API key configured नहीं है।");
+    error.status = 503;
+    throw error;
+  }
+
+  const response = await fetch(
+    "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(GEMINI_IMAGE_MODEL) + ":generateContent",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseModalities: ["IMAGE"],
+          imageConfig: { aspectRatio: "9:16", imageSize: "1024px" }
+        }
+      }),
+      signal: AbortSignal.timeout(90000)
+    }
+  );
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(apiError(response.status, payload));
+    error.status = response.status === 429 ? 429 : response.status >= 500 ? 502 : response.status;
+    throw error;
+  }
+
+  const parts = payload?.candidates?.[0]?.content?.parts || [];
+  const imagePart = parts.find(part => part?.inlineData?.data || part?.inline_data?.data);
+  const base64 = imagePart?.inlineData?.data || imagePart?.inline_data?.data;
+  const mimeType = imagePart?.inlineData?.mimeType || imagePart?.inline_data?.mime_type || "image/png";
+  if (typeof base64 !== "string" || !base64.length) {
+    const error = new Error("Gemini Image API ने image data नहीं लौटाया।");
+    error.status = 502;
+    throw error;
+  }
+  return { buffer: Buffer.from(base64, "base64"), mimeType };
 }
 
 function extractGeminiPcm(payload) {
@@ -250,7 +295,9 @@ app.get("/api/health", (_req, res) => {
     app: "Antardrishti AI Video Studio",
     geminiConfigured: Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== "PASTE_YOUR_KEY_HERE"),
     textModel: GEMINI_TEXT_MODEL,
-    ttsModel: GEMINI_TTS_MODEL
+    ttsModel: GEMINI_TTS_MODEL,
+    imageGenerationEnabled: GEMINI_IMAGE_ENABLED,
+    imageModel: GEMINI_IMAGE_MODEL
   });
 });
 
@@ -274,6 +321,7 @@ app.post("/api/jobs", (req, res) => {
     script: "",
     scriptData: null,
     voiceFile: "",
+    sceneImages: [],
     voiceMode: "female",
     femaleVoice: DEFAULT_FEMALE_VOICE,
     maleVoice: DEFAULT_MALE_VOICE,
@@ -417,6 +465,77 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
   } catch (error) {
     res.status(error.status || 502).json({
       error: error.name === "TimeoutError" ? "Gemini response में समय लग गया। फिर कोशिश करें।" : error.message || "Gemini से connect नहीं हो पाया।"
+    });
+  }
+});
+
+app.post("/api/jobs/:id/generate-scene-images", async (req, res) => {
+  const { jobs, job } = findJob(req.params.id);
+  if (!job) return res.status(404).json({ error: "Video brief not found." });
+  if (!GEMINI_IMAGE_ENABLED) {
+    return res.status(403).json({
+      error: "Paid image generation अभी बंद है। जब आप तैयार हों, local .env में GEMINI_IMAGE_ENABLED=true करें और server restart करें।"
+    });
+  }
+  if (!job.scriptData || !Array.isArray(job.scriptData.scenes) || !job.scriptData.scenes.length) {
+    return res.status(400).json({ error: "पहले video script generate करें।" });
+  }
+
+  const scenes = job.scriptData.scenes.slice(0, 5);
+  const force = req.body?.force === true;
+  const savedImages = Array.isArray(job.sceneImages) ? job.sceneImages : [];
+  const results = [];
+  const safeTopic = String(job.topic || "").replace(/[\r\n]+/g, " ").slice(0, 200);
+
+  try {
+    for (let index = 0; index < scenes.length; index++) {
+      const existing = savedImages.find(item => item.sceneIndex === index && item.url);
+      if (!force && existing && fs.existsSync(path.join(OUTPUT_DIR, path.basename(existing.url)))) {
+        results.push(existing);
+        continue;
+      }
+
+      const visualDirection = String(scenes[index].visual_direction || "").trim();
+      const prompt = [
+        "Create one premium, cinematic vertical 9:16 still image to use as the background visual for a Hindi self-awareness educational video.",
+        "Video topic: " + safeTopic,
+        "Scene " + (index + 1) + " visual direction: " + (visualDirection || "Create a calm, reflective scene that matches the video topic."),
+        "Visual style: photorealistic cinematic photography, tasteful composition, natural light, rich but restrained navy and warm neutral color palette, detailed environment, emotionally calm and respectful.",
+        "Composition: vertical 9:16 portrait framing, clear focal subject, enough uncluttered space around the middle and lower third for later Hindi subtitle overlay.",
+        "Do not include any text, letters, words, captions, signs, logos, watermarks, UI, borders or subtitles in the image.",
+        "Avoid medical imagery, hospital scenes, distressed patients, diagnostic symbols, spiritual supernatural claims or frightening imagery.",
+        "Create a single coherent still image. Do not make a collage, storyboard, split panel or contact sheet."
+      ].join("\n");
+
+      const generated = await generateGeminiSceneImage(prompt);
+      const extension = generated.mimeType.includes("jpeg") || generated.mimeType.includes("jpg")
+        ? "jpg" : generated.mimeType.includes("webp") ? "webp" : "png";
+      const fileName = job.id + "-scene-" + (index + 1) + "." + extension;
+      fs.writeFileSync(path.join(OUTPUT_DIR, fileName), generated.buffer);
+      const item = {
+        sceneIndex: index,
+        url: "/outputs/" + fileName,
+        mimeType: generated.mimeType,
+        model: GEMINI_IMAGE_MODEL,
+        generatedAt: new Date().toISOString()
+      };
+      const priorIndex = savedImages.findIndex(image => image.sceneIndex === index);
+      if (priorIndex >= 0) savedImages[priorIndex] = item;
+      else savedImages.push(item);
+      job.sceneImages = savedImages;
+      job.updatedAt = new Date().toISOString();
+      writeJobs(jobs);
+      results.push(item);
+    }
+
+    job.sceneImages = savedImages.sort((a, b) => a.sceneIndex - b.sceneIndex);
+    job.updatedAt = new Date().toISOString();
+    writeJobs(jobs);
+    res.json({ ok: true, job, sceneImages: job.sceneImages });
+  } catch (error) {
+    res.status(error.status || 502).json({
+      error: error.message || "AI scene images generate नहीं हो पाईं।",
+      generatedImages: results.length
     });
   }
 });
@@ -670,7 +789,10 @@ app.delete("/api/jobs/:id", (req, res) => {
   writeJobs(jobs);
   try {
     if (deletedJob.voiceFile) fs.rmSync(path.join(OUTPUT_DIR, path.basename(deletedJob.voiceFile)), { force: true });
-  } catch { /* Ignore optional audio cleanup errors. */ }
+    for (const image of deletedJob.sceneImages || []) {
+      if (image.url) fs.rmSync(path.join(OUTPUT_DIR, path.basename(image.url)), { force: true });
+    }
+  } catch { /* Ignore optional media cleanup errors. */ }
   res.json({ ok: true, deletedId: deletedJob.id });
 });
 
