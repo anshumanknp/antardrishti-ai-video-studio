@@ -1209,14 +1209,27 @@
         if (!slide.imageUrl) continue;
         slide.imageElement = await new Promise(resolve => {
           const image = new Image();
-          image.onload = () => resolve(image);
-          image.onerror = () => resolve(null);
+          let settled = false;
+          const finish = value => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(imageTimeout);
+            resolve(value);
+          };
+          const imageTimeout = setTimeout(() => finish(null), 15000);
+          image.onload = () => finish(image);
+          image.onerror = () => finish(null);
           image.src = slide.imageUrl + "?v=" + Date.now();
         });
       }
 
       if (!brandLogoMeta) await loadBrandLogo();
-      if (brandLogoMeta) await brandLogoLoadPromise;
+      if (brandLogoMeta && brandLogoLoadPromise) {
+        await Promise.race([
+          brandLogoLoadPromise,
+          new Promise(resolve => setTimeout(() => resolve(false), 10000))
+        ]);
+      }
 
       const canvasStream = canvas.captureStream(30);
       let mixedStream = canvasStream;
@@ -1378,12 +1391,29 @@
 
       recorder.start(500);
       let animationStart = null;
+      let renderFinished = false;
+      let renderError = null;
+      const hardStopTimer = setTimeout(() => {
+        if (!renderFinished && recorder.state === "recording") {
+          renderError = new Error("Browser ने video rendering बीच में रोक दी। Create Slide Video से दोबारा कोशिश करें।");
+          recorder.stop();
+        }
+      }, (totalSec + 20) * 1000);
+
       function animate(timestamp) {
-        if (animationStart === null) animationStart = timestamp;
-        const elapsed = (timestamp - animationStart) / 1000;
-        renderAt(Math.min(elapsed, totalSec));
-        if (elapsed < totalSec) requestAnimationFrame(animate);
-        else recorder.stop();
+        try {
+          if (animationStart === null) animationStart = timestamp;
+          const elapsed = (timestamp - animationStart) / 1000;
+          renderAt(Math.min(elapsed, totalSec));
+          if (elapsed < totalSec) requestAnimationFrame(animate);
+          else {
+            renderFinished = true;
+            if (recorder.state === "recording") recorder.stop();
+          }
+        } catch (error) {
+          renderError = error;
+          if (recorder.state === "recording") recorder.stop();
+        }
       }
       requestAnimationFrame(animate);
       if (audioContext && audioContext.state === "suspended") {
@@ -1392,7 +1422,26 @@
       if (audioSource) {
         try { audioSource.start(0); } catch { /* Audio may have been stopped by the browser. */ }
       }
-      await stopped;
+
+      let stopTimeoutId;
+      try {
+        await Promise.race([
+          stopped,
+          new Promise((_, reject) => {
+            stopTimeoutId = setTimeout(
+              () => reject(new Error("Browser video recorder ने समय पर response नहीं दिया। Page खुला रखकर फिर कोशिश करें।")),
+              (totalSec + 45) * 1000
+            );
+          })
+        ]);
+      } finally {
+        clearTimeout(hardStopTimer);
+        clearTimeout(stopTimeoutId);
+      }
+      if (renderError) throw renderError;
+      if (!renderFinished) {
+        throw new Error("Video rendering पूरा नहीं हुआ। Page खुला रखकर Create Slide Video दोबारा चलाएँ।");
+      }
 
       const mimeType = recorder.mimeType || chosenMime || "video/webm";
       const extension = mimeType.includes("mp4") ? "mp4" : "webm";
