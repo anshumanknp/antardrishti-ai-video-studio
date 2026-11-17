@@ -29,6 +29,7 @@ const PORT = Number(process.env.PORT || 3460);
 const DATA_DIR = path.join(__dirname, "..", "data");
 const OUTPUT_DIR = path.join(__dirname, "..", "outputs");
 const JOBS_FILE = path.join(DATA_DIR, "jobs.json");
+const BRAND_LOGO_META_FILE = path.join(DATA_DIR, "brand-logo.json");
 const GEMINI_TEXT_MODEL = "gemini-3.1-flash-lite";
 const GEMINI_TTS_MODEL = process.env.GEMINI_TTS_MODEL || "gemini-3.1-flash-tts-preview";
 const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || "";
@@ -48,7 +49,7 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 if (!fs.existsSync(JOBS_FILE)) fs.writeFileSync(JOBS_FILE, "[]", "utf8");
 
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "3mb" }));
 app.use(express.static(path.join(__dirname, "..", "public")));
 app.use("/outputs", express.static(OUTPUT_DIR));
 
@@ -362,6 +363,91 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
+app.get("/api/brand/logo", (_req, res) => {
+  try {
+    const brand = JSON.parse(fs.readFileSync(BRAND_LOGO_META_FILE, "utf8"));
+    if (!brand?.fileName || !fs.existsSync(path.join(OUTPUT_DIR, brand.fileName))) {
+      return res.json({ ok: true, logo: null });
+    }
+    return res.json({
+      ok: true,
+      logo: {
+        url: "/outputs/" + brand.fileName,
+        mimeType: brand.mimeType,
+        fileName: brand.fileName,
+        updatedAt: brand.updatedAt
+      }
+    });
+  } catch {
+    return res.json({ ok: true, logo: null });
+  }
+});
+
+app.post("/api/brand/logo", (req, res) => {
+  const dataUrl = req.body?.dataUrl;
+  if (typeof dataUrl !== "string") {
+    return res.status(400).json({ error: "Logo image upload नहीं हुई।" });
+  }
+
+  const match = dataUrl.match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) {
+    return res.status(400).json({ error: "केवल PNG, JPG या WebP logo upload करें।" });
+  }
+
+  const mimeType = match[1];
+  const buffer = Buffer.from(match[2], "base64");
+  if (!buffer.length || buffer.length > 1.5 * 1024 * 1024) {
+    return res.status(413).json({ error: "Logo file 1.5 MB से छोटी रखें।" });
+  }
+
+  const validSignature =
+    (mimeType === "image/png" && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) ||
+    (mimeType === "image/jpeg" && buffer[0] === 0xff && buffer[1] === 0xd8) ||
+    (mimeType === "image/webp" && buffer.toString("ascii", 0, 4) === "RIFF" && buffer.toString("ascii", 8, 12) === "WEBP");
+  if (!validSignature) {
+    return res.status(400).json({ error: "Logo file format सही नहीं है। PNG, JPG या WebP चुनें।" });
+  }
+
+  const extension = mimeType === "image/jpeg" ? "jpg" : mimeType === "image/webp" ? "webp" : "png";
+  const fileName = "antardrishti-brand-logo." + extension;
+  const previousName = (() => {
+    try { return JSON.parse(fs.readFileSync(BRAND_LOGO_META_FILE, "utf8"))?.fileName || ""; }
+    catch { return ""; }
+  })();
+
+  fs.writeFileSync(path.join(OUTPUT_DIR, fileName), buffer);
+  if (previousName && previousName !== fileName) {
+    fs.rmSync(path.join(OUTPUT_DIR, path.basename(previousName)), { force: true });
+  }
+
+  const logo = {
+    fileName,
+    mimeType,
+    updatedAt: new Date().toISOString()
+  };
+  fs.writeFileSync(BRAND_LOGO_META_FILE, JSON.stringify(logo, null, 2), "utf8");
+  res.json({
+    ok: true,
+    logo: {
+      url: "/outputs/" + fileName,
+      mimeType,
+      fileName,
+      updatedAt: logo.updatedAt
+    }
+  });
+});
+
+app.delete("/api/brand/logo", (_req, res) => {
+  try {
+    const logo = JSON.parse(fs.readFileSync(BRAND_LOGO_META_FILE, "utf8"));
+    if (logo?.fileName) {
+      fs.rmSync(path.join(OUTPUT_DIR, path.basename(logo.fileName)), { force: true });
+    }
+    fs.rmSync(BRAND_LOGO_META_FILE, { force: true });
+  } catch { /* No saved brand logo. */ }
+  res.json({ ok: true });
+});
+
 app.get("/api/jobs", (_req, res) => res.json(readJobs()));
 
 app.post("/api/jobs", (req, res) => {
@@ -558,14 +644,15 @@ app.post("/api/jobs/:id/generate-scene-images", async (req, res) => {
 
       const visualDirection = String(scenes[index].visual_direction || "").trim();
       const prompt = [
-        "Create one premium, cinematic square still image designed to be center-cropped into a vertical 9:16 video background for a Hindi self-awareness educational video.",
+        "Create one premium, cinematic square still image to use as a clean background visual for a vertical 9:16 Hindi self-awareness video.",
         "Video topic: " + safeTopic,
-        "Scene " + (index + 1) + " visual direction: " + (visualDirection || "Create a calm, reflective scene that matches the video topic."),
-        "Visual style: photorealistic cinematic photography, tasteful composition, natural light, rich but restrained navy and warm neutral color palette, detailed environment, emotionally calm and respectful.",
-        "Composition: square image with the main subject, face and key visual elements kept inside the central vertical 9:16 safe area; the far left and right edges may be cropped. Keep enough uncluttered space around the middle and lower third for later Hindi subtitle overlay.",
-        "Do not include any text, letters, words, captions, signs, logos, watermarks, UI, borders or subtitles in the image.",
-        "Avoid medical imagery, hospital scenes, distressed patients, diagnostic symbols, spiritual supernatural claims or frightening imagery.",
-        "Create a single coherent still image. Do not make a collage, storyboard, split panel or contact sheet."
+        "Visual description: " + (visualDirection || "Create a calm, reflective scene that matches the video topic."),
+        "Visual style: photorealistic cinematic photography, tasteful composition, natural light, restrained navy and warm neutral palette, detailed environment, emotionally calm and respectful.",
+        "Composition: square image, with the main subject and all important details kept within the central vertical crop-safe area. Leave the lower third calm and uncluttered for Hindi captions to be added later by the video editor.",
+        "IMPORTANT: The image must contain no writing at all. Do not draw words, letters, numbers, labels, signs, titles, headings, captions, subtitles, logos, watermarks, scene names, scene numbers, UI or borders.",
+        "Do not write or depict the words Scene, Scene 1, Scene 2, Scene 3, or any numbered scene label.",
+        "Avoid medical imagery, hospital scenes, distressed patients, diagnostic symbols, supernatural claims or frightening imagery.",
+        "Create one coherent photograph, not a collage, storyboard, split panel, contact sheet or poster."
       ].join("\n");
 
       const generated = await generateCloudflareSceneImage(prompt);
