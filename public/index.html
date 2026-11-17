@@ -234,7 +234,7 @@
         <section class="panel">
           <div class="panel-heading">
             <h2>Monthly production target</h2>
-            <span class="panel-kicker">NOVEMBER PLAN</span>
+            <span class="panel-kicker" id="monthPlanLabel">THIS MONTH</span>
           </div>
           <div class="target-row">
             <div>
@@ -486,6 +486,9 @@
   document.getElementById("todayDate").textContent = new Intl.DateTimeFormat("en-IN", {
     weekday: "short", day: "2-digit", month: "short", year: "numeric"
   }).format(new Date());
+  document.getElementById("monthPlanLabel").textContent = new Intl.DateTimeFormat("en-IN", {
+    month: "long", year: "numeric"
+  }).format(new Date()).toUpperCase() + " PLAN";
 
   loadJobs().catch(error => {
     jobsBody.innerHTML = "";
