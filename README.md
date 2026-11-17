@@ -48,16 +48,28 @@ Female voice choices: Kore, Aoede, Leda, Zephyr and Gacrux. Male voice choices: 
 
 The current video builder uses animated gradients, shapes, title cards and scene subtitles. It adds the generated Hindi audio and can export MP4 or WebM depending on browser support. It also creates a separate scene-timed Hindi `.srt` file for use in an editor or publishing workflow.
 
-This is a slide-based video builder. It does not yet generate AI presenter footage, realistic cinematic clips or AI-generated scene images. Visual directions stay as internal production notes and are not printed as text over the scenes.
+The Studio can optionally generate one AI image for each of the three scenes and use those images as full-bleed video backgrounds. The scene-image generator is disabled by default. It requires an explicit opt-in in the local `.env` file and a paid Gemini image API request. No image request is sent while the flag is false. Visual directions are used as prompts and are not printed as text over the scenes. AI presenter footage and generated cinematic video clips are separate future integrations.
 
 ## API models and usage
 
 - Script and Duet dialogue: `gemini-3.1-flash-lite` (the server can try `gemini-3.5-flash-lite` after a temporary overload).
 - Hindi narration: `gemini-3.1-flash-tts-preview`.
+- Optional scene images: `gemini-3.1-flash-lite-image` (paid API; 1K output only).
 - Duet uses Gemini's two-speaker TTS configuration.
 - Blend makes two TTS requests and mixes their PCM audio into one WAV.
 
-TTS requests can take longer than script generation. Blend uses about twice the TTS generation requests of a single voice. Free-tier access, quotas and model names can change; check Google AI Studio usage before production use. Do not send private client or therapy information to the API.
+TTS requests can take longer than script generation. Blend uses about twice the TTS generation requests of a single voice. Gemini image generation has no API Free Tier; the published Standard price for a 1K image is approximately US$0.0336. Three scene images are approximately US$0.1008 per video (about US$3.02 for 30 videos), before any applicable taxes or price changes. Check the current Google AI Studio pricing and usage before production use. Do not send private client or therapy information to the API.
+
+### Enable paid scene images (optional)
+
+Leave these settings in the local `.env` file to keep image generation off:
+
+```env
+GEMINI_IMAGE_ENABLED=false
+GEMINI_IMAGE_MODEL=gemini-3.1-flash-lite-image
+```
+
+Only when you explicitly decide to use paid image generation, change the first setting to `true` and restart the server. The **Generate AI Scene Images (Paid)** button then becomes available. It asks for confirmation before generating images. The server stores generated scene images in `outputs/`, reuses existing images unless a full refresh is confirmed, and deletes them when the related video job is deleted.
 
 ## Requirements
 
@@ -73,13 +85,12 @@ TTS requests can take longer than script generation. Blend uses about twice the 
 
 ## Planned implementation
 
-1. Connect an image provider for generated scene artwork, with a provider interface so the rest of the app does not depend on one vendor.
-2. Connect an AI presenter/avatar provider and support presenter shots between generated scenes.
-3. Add optional AI-generated cinematic video clips after choosing a provider and checking its pricing, limits and commercial-use terms.
-4. Improve subtitle timing beyond the current scene-level SRT and add optional caption styling.
-5. Add reliable MP4 rendering and final export checks.
-6. Keep preview, edit, regenerate and human-approval steps before publication.
-7. Export approved videos for the existing Buffer workflow. Direct publishing stays out of scope until API access and permissions are confirmed.
+1. Add an AI presenter/avatar provider and support presenter shots between generated scenes.
+2. Add optional AI-generated cinematic video clips after choosing a provider and checking its pricing, limits and commercial-use terms.
+3. Improve subtitle timing beyond the current scene-level SRT and add optional caption styling.
+4. Add reliable MP4 rendering and final export checks.
+5. Keep preview, edit, regenerate and human-approval steps before publication.
+6. Export approved videos for the existing Buffer workflow. Direct publishing stays out of scope until API access and permissions are confirmed.
 
 ## Content safety
 
