@@ -609,6 +609,27 @@
       </article>`).join("");
   }
 
+  function drawBrandLogo(context, canvasWidth, canvasHeight) {
+    if (!brandLogoImage || !brandLogoImage.complete ||
+        !brandLogoImage.naturalWidth || !brandLogoImage.naturalHeight) return;
+
+    const maxWidth = 148;
+    const maxHeight = 92;
+    const scale = Math.min(
+      maxWidth / brandLogoImage.naturalWidth,
+      maxHeight / brandLogoImage.naturalHeight,
+      1
+    );
+    const drawWidth = brandLogoImage.naturalWidth * scale;
+    const drawHeight = brandLogoImage.naturalHeight * scale;
+    const x = canvasWidth - 78 - drawWidth;
+    const y = 56 + (maxHeight - drawHeight) / 2;
+
+    context.save();
+    context.globalAlpha = 0.96;
+    context.drawImage(brandLogoImage, x, y, drawWidth, drawHeight);
+    context.restore();
+  }
   function renderBrandLogoPreview(logo) {
     const host = document.getElementById("brandLogoPreviewHost");
     host.replaceChildren();
