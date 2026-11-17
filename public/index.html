@@ -122,6 +122,37 @@
     .delete-job { padding: 7px 9px; border: 1px solid #78494f; border-radius: 6px; background: #3a222b; color: #f0b4b4; font-size: 9px; cursor: pointer; }
     .delete-job:hover { background: #512a34; border-color: #c87979; }
     .delete-job:disabled { opacity: .55; cursor: wait; }
+    .open-script { padding: 7px 9px; border: 1px solid #8a704a; border-radius: 6px; background: #403522; color: #f0d29d; font-size: 9px; cursor: pointer; white-space: nowrap; }
+    .open-script:hover { background: #58472a; border-color: var(--gold); }
+    .modal {
+      width: min(900px, calc(100vw - 28px)); max-width: 900px; max-height: 90vh;
+      padding: 0; color: var(--text); background: #111c2c; border: 1px solid #43536a;
+      border-radius: 14px; box-shadow: 0 22px 80px #000a;
+    }
+    .modal::backdrop { background: #050a12cc; backdrop-filter: blur(4px); }
+    .modal-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:18px 20px; border-bottom:1px solid var(--line); }
+    .modal-head h2 { margin:0; font:500 21px Georgia,serif; }
+    .modal-close { border:1px solid #46566d; background:#1b293d; color:#eaf0f8; border-radius:7px; padding:7px 10px; cursor:pointer; }
+    .modal-body { padding:20px; overflow-y:auto; max-height:calc(90vh - 150px); }
+    .modal-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .modal-field { margin-bottom:13px; }
+    .modal-field textarea { min-height:170px; resize:vertical; line-height:1.65; }
+    .modal-field input { width:100%; }
+    .script-scenes { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:14px 0; }
+    .scene-card { padding:13px; background:#19273a; border:1px solid #30435d; border-radius:9px; }
+    .scene-card strong { display:block; margin-bottom:7px; color:#e6c78e; font-size:11px; }
+    .scene-card p { margin:6px 0; color:#bac7d7; font-size:11px; line-height:1.55; }
+    .scene-card small { display:block; color:#8293a9; font-size:9px; line-height:1.5; }
+    .modal-actions { display:flex; flex-wrap:wrap; gap:9px; margin-top:14px; }
+    .secondary-btn { border:1px solid #40536c; background:#1d2b40; color:#dce5ef; padding:10px 13px; border-radius:7px; font-size:11px; cursor:pointer; }
+    .secondary-btn:disabled, .primary-btn:disabled { opacity:.6; cursor:wait; }
+    .modal-status { min-height:18px; margin:10px 0; color:var(--green); font-size:11px; }
+    .modal-status.error { color:var(--red); }
+    .voice-player { width:100%; margin-top:10px; }
+    .video-result { display:none; margin-top:16px; padding:12px; background:#0c1522; border:1px solid #30435d; border-radius:9px; }
+    .video-result video { width:min(260px,100%); display:block; margin:0 auto 10px; background:#000; border-radius:8px; }
+    .video-result a { display:block; text-align:center; color:#e6c78e; font-size:12px; text-decoration:underline; }
+    .privacy-note { color:#8091a7; font-size:10px; line-height:1.55; margin-top:8px; }
     .empty { padding: 35px 20px; text-align: center; color: var(--muted); font-size: 12px; }
     .footer-note { margin: 15px 2px 0; color: #75869b; font-size: 10px; line-height: 1.7; }
     .toast-error { color: var(--red) !important; }
@@ -154,6 +185,8 @@
       .queue-tools { width: 100%; }
       .queue-tools input { flex: 1; width: 1px; }
       .queue-tools select { width: 135px; }
+      .modal-grid, .script-scenes { grid-template-columns:1fr; }
+      .modal-body { padding:15px; }
     }
     @media (max-width: 420px) {
       .stats { grid-template-columns: 1fr 1fr; }
@@ -323,7 +356,7 @@
       <div class="table-wrap">
         <table>
           <thead>
-            <tr><th>Video brief</th><th>Format</th><th>Duration</th><th>Created</th><th>Current status</th><th>Update</th><th>Delete</th></tr>
+            <tr><th>Video brief</th><th>Format</th><th>Duration</th><th>Created</th><th>Current status</th><th>Studio</th><th>Update</th><th>Delete</th></tr>
           </thead>
           <tbody id="jobsBody"></tbody>
         </table>
@@ -331,6 +364,50 @@
       </div>
     </section>
 
+    <dialog class="modal" id="scriptDialog" aria-labelledby="scriptDialogTitle">
+      <div class="modal-head">
+        <h2 id="scriptDialogTitle">Antardrishti Script Studio</h2>
+        <button class="modal-close" id="closeScriptDialog" type="button">Close</button>
+      </div>
+      <div class="modal-body">
+        <p class="panel-kicker" id="scriptTopicLabel"></p>
+        <div class="modal-grid">
+          <div class="modal-field">
+            <label for="scriptTitle">VIDEO TITLE</label>
+            <input id="scriptTitle" maxlength="200">
+          </div>
+          <div class="modal-field">
+            <label for="scriptHook">OPENING HOOK</label>
+            <input id="scriptHook" maxlength="500">
+          </div>
+        </div>
+        <div class="modal-field">
+          <label for="voiceoverText">HINDI VOICEOVER SCRIPT (EDITABLE)</label>
+          <textarea id="voiceoverText" maxlength="12000" placeholder="Generate a script to begin…"></textarea>
+        </div>
+        <div class="modal-field">
+          <label for="scriptCta">CALL TO ACTION</label>
+          <input id="scriptCta" maxlength="500">
+        </div>
+        <div class="panel-heading"><h2>Scene-by-scene slide plan</h2><span class="panel-kicker">9:16 VERTICAL</span></div>
+        <div id="scriptScenes" class="script-scenes">
+          <p class="panel-kicker">अभी script generate नहीं हुई है।</p>
+        </div>
+        <div class="modal-actions">
+          <button class="primary-btn" id="generateScriptBtn" type="button">Generate / Regenerate Script</button>
+          <button class="secondary-btn" id="saveScriptBtn" type="button">Save Script Edits</button>
+          <button class="secondary-btn" id="generateVoiceBtn" type="button">Generate Hindi Voice</button>
+          <button class="secondary-btn" id="renderVideoBtn" type="button">Create Slide Video</button>
+        </div>
+        <p class="modal-status" id="studioStatus" role="status"></p>
+        <audio id="voicePlayer" class="voice-player" controls hidden></audio>
+        <div class="video-result" id="videoResult">
+          <video id="videoPreview" controls playsinline></video>
+          <a id="videoDownload" href="#" download>Download video</a>
+        </div>
+        <p class="privacy-note">Free-tier AI requests are sent to Google. Do not include client names, private therapy notes or other sensitive personal information. Generated scripts need your review before publication.</p>
+      </div>
+    </dialog>
     <p class="footer-note">यह dashboard अभी video briefs और production status manage करता है। Actual AI script, presenter, voice, cinematic clips, subtitles और MP4 rendering अगले development चरण में जोड़े जाएँगे। Final publishing से पहले आपकी approval रहेगी।</p>
   </main>
 </div>
@@ -419,6 +496,7 @@
           <td>${escapeHtml(job.duration)} sec</td>
           <td>${formatDate(job.createdAt)}</td>
           <td><select class="status-select" aria-label="Status for ${escapeHtml(job.topic)}">${options}</select></td>
+          <td><button class="open-script" type="button">Open Studio</button></td>
           <td><button class="save-status" type="button">Save</button></td>
           <td><button class="delete-job" type="button">Delete</button></td>
         </tr>`;
@@ -432,6 +510,374 @@
     renderStats();
     renderQueue();
   }
+
+  const scriptDialog = document.getElementById("scriptDialog");
+  const studioStatus = document.getElementById("studioStatus");
+  const voicePlayer = document.getElementById("voicePlayer");
+  let activeJobId = null;
+  let activeJob = null;
+  let activeScriptData = null;
+  let currentVideoUrl = null;
+
+  function setStudioStatus(text, isError = false) {
+    studioStatus.textContent = text;
+    studioStatus.classList.toggle("error", isError);
+  }
+
+  function drawSceneCards(scenes) {
+    const host = document.getElementById("scriptScenes");
+    if (!Array.isArray(scenes) || !scenes.length) {
+      host.innerHTML = '<p class="panel-kicker">अभी कोई scene plan नहीं है।</p>';
+      return;
+    }
+    host.innerHTML = scenes.map((scene, index) => `
+      <article class="scene-card">
+        <strong>Scene ${index + 1} · ${escapeHtml(scene.duration_sec || 0)} sec</strong>
+        <p><b>Dialogue:</b> ${escapeHtml(scene.dialogue || "")}</p>
+        <p><b>Visual:</b> ${escapeHtml(scene.visual_direction || "")}</p>
+        <small>Subtitle: ${escapeHtml(scene.subtitle || "")}</small>
+      </article>`).join("");
+  }
+
+  function displayScript(job) {
+    activeJob = job;
+    activeScriptData = job.scriptData || null;
+    document.getElementById("scriptTopicLabel").textContent = job.topic + " · " + job.duration + " sec · Mixed/slide workflow";
+    document.getElementById("scriptTitle").value = activeScriptData?.title || "";
+    document.getElementById("scriptHook").value = activeScriptData?.hook || "";
+    document.getElementById("voiceoverText").value = activeScriptData?.voiceover || job.script || "";
+    document.getElementById("scriptCta").value = activeScriptData?.cta || "";
+    drawSceneCards(activeScriptData?.scenes || []);
+    voicePlayer.hidden = !job.voiceFile;
+    if (job.voiceFile) voicePlayer.src = job.voiceFile + "?v=" + Date.now();
+    else {
+      voicePlayer.removeAttribute("src");
+      voicePlayer.load();
+    }
+    document.getElementById("renderVideoBtn").disabled = !activeScriptData;
+    document.getElementById("generateVoiceBtn").disabled = !activeScriptData;
+  }
+
+  async function openScriptStudio(jobId) {
+    activeJobId = jobId;
+    activeJob = jobs.find(job => job.id === jobId) || null;
+    if (!activeJob) return;
+    setStudioStatus("Video brief खुल रहा है…");
+    displayScript(activeJob);
+    if (!scriptDialog.open) scriptDialog.showModal();
+    if (!activeJob.scriptData) await generateScript(true);
+    else setStudioStatus("Script तैयार है। Edit करें या अगला step चुनें।");
+  }
+
+  async function generateScript(opening = false) {
+    if (!activeJobId) return;
+    const button = document.getElementById("generateScriptBtn");
+    button.disabled = true;
+    button.textContent = "Generating…";
+    setStudioStatus("Gemini Hindi script और scene plan बना रहा है…");
+    try {
+      const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/generate-script", { method: "POST" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Script generation failed.");
+      activeJob = result.job;
+      await loadJobs();
+      displayScript(activeJob);
+      setStudioStatus("Hindi script और scene plan तैयार हैं। अब आप इन्हें edit कर सकते हैं।");
+    } catch (error) {
+      setStudioStatus(error.message || "Script generate नहीं हो सकी।", true);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Generate / Regenerate Script";
+    }
+  }
+
+  async function saveScriptEdits() {
+    if (!activeJobId || !activeScriptData) {
+      setStudioStatus("पहले script generate करें।", true);
+      return;
+    }
+    const button = document.getElementById("saveScriptBtn");
+    button.disabled = true;
+    setStudioStatus("Script save हो रही है…");
+    try {
+      const data = {
+        ...activeScriptData,
+        title: document.getElementById("scriptTitle").value.trim(),
+        hook: document.getElementById("scriptHook").value.trim(),
+        voiceover: document.getElementById("voiceoverText").value.trim(),
+        cta: document.getElementById("scriptCta").value.trim()
+      };
+      const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scriptData: data, script: data.voiceover })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Script save नहीं हुई।");
+      activeJob = result;
+      activeScriptData = result.scriptData;
+      await loadJobs();
+      setStudioStatus("आपके script edits save हो गए।");
+    } catch (error) {
+      setStudioStatus(error.message || "Script save नहीं हुई।", true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function generateHindiVoice() {
+    if (!activeJobId) return;
+    await saveScriptEdits();
+    const button = document.getElementById("generateVoiceBtn");
+    button.disabled = true;
+    button.textContent = "Generating voice…";
+    setStudioStatus("Gemini Hindi voice बना रहा है। इसमें थोड़ा समय लग सकता है…");
+    try {
+      const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/generate-voice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ voiceover: document.getElementById("voiceoverText").value.trim() })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Voice generation failed.");
+      activeJob.voiceFile = result.voiceFile;
+      voicePlayer.src = result.voiceFile + "?v=" + Date.now();
+      voicePlayer.hidden = false;
+      await loadJobs();
+      setStudioStatus("Hindi voice तैयार है। नीचे Play करके सुन सकते हैं।");
+    } catch (error) {
+      setStudioStatus(error.message || "Voice generation नहीं हो पाई।", true);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Generate Hindi Voice";
+    }
+  }
+
+  function wrapCanvasText(context, text, x, y, maxWidth, lineHeight, maxLines = 4) {
+    const words = String(text || "").split(/\s+/);
+    let line = "";
+    let lines = [];
+    for (const word of words) {
+      const test = line ? line + " " + word : word;
+      if (context.measureText(test).width > maxWidth && line) {
+        lines.push(line);
+        line = word;
+      } else line = test;
+    }
+    if (line) lines.push(line);
+    lines = lines.slice(0, maxLines);
+    lines.forEach((item, index) => context.fillText(item, x, y + index * lineHeight));
+    return lines.length;
+  }
+
+  async function createSlideVideo() {
+    if (!activeJob || !activeScriptData) {
+      setStudioStatus("पहले script generate करें।", true);
+      return;
+    }
+    const button = document.getElementById("renderVideoBtn");
+    button.disabled = true;
+    button.textContent = "Building video…";
+    setStudioStatus("Vertical slide video तैयार हो रहा है…");
+    try {
+      const scenes = activeScriptData.scenes || [];
+      const canvas = document.createElement("canvas");
+      canvas.width = 1080;
+      canvas.height = 1920;
+      const context = canvas.getContext("2d");
+      const introSec = 3;
+      const outroSec = 3;
+      let audioBuffer = null;
+      let audioContext = null;
+
+      if (activeJob.voiceFile) {
+        try {
+          const audioResponse = await fetch(activeJob.voiceFile);
+          if (audioResponse.ok) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            audioBuffer = await audioContext.decodeAudioData(await audioResponse.arrayBuffer());
+          }
+        } catch {
+          audioBuffer = null;
+        }
+      }
+
+      const totalSec = Math.max(Number(activeJob.duration || 45), audioBuffer ? audioBuffer.duration + introSec + 1 : 0);
+      const contentSec = Math.max(5, totalSec - introSec - outroSec);
+      const totalWeight = scenes.reduce((sum, scene) => sum + Math.max(1, Number(scene.duration_sec || 5)), 0);
+      const slides = [
+        { type: "intro", duration: introSec, title: activeScriptData.title, body: activeScriptData.hook }
+      ];
+      scenes.forEach((scene, index) => {
+        slides.push({
+          type: "scene",
+          duration: contentSec * (Math.max(1, Number(scene.duration_sec || 5)) / totalWeight),
+          title: "SCENE " + String(index + 1).padStart(2, "0"),
+          body: scene.subtitle || scene.dialogue || "",
+          visual: scene.visual_direction || ""
+        });
+      });
+      slides.push({ type: "outro", duration: outroSec, title: "ANTARDRISHTI", body: activeScriptData.cta || "और जानने के लिए follow करें।" });
+
+      const canvasStream = canvas.captureStream(30);
+      let mixedStream = canvasStream;
+      let audioSource = null;
+      let audioDestination = null;
+      if (audioBuffer && audioContext) {
+        audioDestination = audioContext.createMediaStreamDestination();
+        audioSource = audioContext.createBufferSource();
+        audioSource.buffer = audioBuffer;
+        audioSource.connect(audioDestination);
+        audioDestination.stream.getAudioTracks().forEach(track => canvasStream.addTrack(track));
+        mixedStream = canvasStream;
+      }
+
+      const mimeCandidates = [
+        "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+        "video/mp4",
+        "video/webm;codecs=vp9,opus",
+        "video/webm"
+      ];
+      const chosenMime = mimeCandidates.find(type => MediaRecorder.isTypeSupported(type)) || "";
+      const recorder = new MediaRecorder(mixedStream, chosenMime ? { mimeType: chosenMime } : undefined);
+      const chunks = [];
+      recorder.ondataavailable = event => { if (event.data && event.data.size) chunks.push(event.data); };
+      const stopped = new Promise((resolve, reject) => {
+        recorder.onstop = resolve;
+        recorder.onerror = () => reject(new Error("Browser video recorder failed."));
+      });
+
+      function drawSlide(slide, slideIndex, elapsed) {
+        const w = canvas.width, h = canvas.height;
+        const gradient = context.createLinearGradient(0, 0, w, h);
+        gradient.addColorStop(0, "#0d1728");
+        gradient.addColorStop(0.55, "#1a2b42");
+        gradient.addColorStop(1, "#31271e");
+        context.fillStyle = gradient;
+        context.fillRect(0, 0, w, h);
+
+        context.globalAlpha = 0.23;
+        context.fillStyle = "#d8ad68";
+        context.beginPath();
+        context.arc(860 + Math.sin(elapsed * 0.5) * 25, 300, 210, 0, Math.PI * 2);
+        context.fill();
+        context.globalAlpha = 0.18;
+        context.beginPath();
+        context.arc(130, 1420, 300, 0, Math.PI * 2);
+        context.fill();
+        context.globalAlpha = 1;
+
+        context.fillStyle = "#e0bd7b";
+        context.font = "600 30px Arial, 'Noto Sans Devanagari', sans-serif";
+        context.fillText("ANTARDRISHTI  /  SELF AWARENESS", 76, 112);
+        context.fillStyle = "#8094ad";
+        context.font = "24px Arial, sans-serif";
+        context.fillText("HINDI FIRST  ·  9:16 VERTICAL", 78, 158);
+
+        context.strokeStyle = "#8f7349";
+        context.lineWidth = 3;
+        context.beginPath();
+        context.moveTo(78, 205);
+        context.lineTo(1002, 205);
+        context.stroke();
+
+        if (slide.type === "intro") {
+          context.fillStyle = "#e2bd78";
+          context.font = "600 30px Arial, 'Noto Sans Devanagari', sans-serif";
+          context.fillText("A SMALL PAUSE FOR YOURSELF", 78, 600);
+          context.fillStyle = "#f4f0e8";
+          context.font = "600 78px Arial, 'Noto Sans Devanagari', sans-serif";
+          const titleLines = wrapCanvasText(context, slide.title, 78, 760, 910, 100, 4);
+          context.fillStyle = "#d5dfeb";
+          context.font = "42px Arial, 'Noto Sans Devanagari', sans-serif";
+          wrapCanvasText(context, slide.body, 82, 840 + titleLines * 82, 900, 62, 4);
+        } else if (slide.type === "outro") {
+          context.fillStyle = "#e4c488";
+          context.font = "600 44px Georgia, serif";
+          context.fillText("ANTARDRISHTI", 78, 650);
+          context.fillStyle = "#f4f0e8";
+          context.font = "600 62px Arial, 'Noto Sans Devanagari', sans-serif";
+          wrapCanvasText(context, slide.body, 78, 810, 900, 82, 5);
+        } else {
+          context.fillStyle = "#d8b576";
+          context.font = "600 29px Arial, sans-serif";
+          context.fillText(slide.title, 78, 500);
+          context.fillStyle = "#f5f1e9";
+          context.font = "600 58px Arial, 'Noto Sans Devanagari', sans-serif";
+          wrapCanvasText(context, slide.body, 78, 730, 900, 84, 6);
+          context.fillStyle = "#aab9cb";
+          context.font = "28px Arial, 'Noto Sans Devanagari', sans-serif";
+          wrapCanvasText(context, slide.visual, 80, 1390, 900, 42, 4);
+        }
+
+        context.fillStyle = "#b5c0cf";
+        context.font = "24px Arial, sans-serif";
+        context.fillText("HYPNOTHERAPY  ·  REFLECTION  ·  LEARNING", 78, 1790);
+        context.fillStyle = "#d8b576";
+        context.fillRect(78, 1830, 924 * ((slideIndex + 1) / slides.length), 5);
+      }
+
+      function renderAt(elapsedSec) {
+        let cursor = 0;
+        for (let i = 0; i < slides.length; i++) {
+          const slide = slides[i];
+          if (elapsedSec < cursor + slide.duration || i === slides.length - 1) {
+            drawSlide(slide, i, elapsedSec - cursor);
+            return;
+          }
+          cursor += slide.duration;
+        }
+      }
+
+      recorder.start(500);
+      let animationStart = null;
+      function animate(timestamp) {
+        if (animationStart === null) animationStart = timestamp;
+        const elapsed = (timestamp - animationStart) / 1000;
+        renderAt(Math.min(elapsed, totalSec));
+        if (elapsed < totalSec) requestAnimationFrame(animate);
+        else recorder.stop();
+      }
+      requestAnimationFrame(animate);
+      if (audioSource) {
+        window.setTimeout(() => {
+          try { audioSource.start(); } catch { /* Audio may have been stopped by the browser. */ }
+        }, introSec * 1000);
+      }
+      await stopped;
+
+      const mimeType = recorder.mimeType || chosenMime || "video/webm";
+      const extension = mimeType.includes("mp4") ? "mp4" : "webm";
+      const blob = new Blob(chunks, { type: mimeType });
+      if (blob.size < 1000) throw new Error("Video file नहीं बन पाई। फिर कोशिश करें।");
+
+      if (currentVideoUrl) URL.revokeObjectURL(currentVideoUrl);
+      currentVideoUrl = URL.createObjectURL(blob);
+      const videoPreview = document.getElementById("videoPreview");
+      videoPreview.src = currentVideoUrl;
+      const download = document.getElementById("videoDownload");
+      download.href = currentVideoUrl;
+      download.download = "antardrishti-" + activeJob.id.slice(0, 8) + "." + extension;
+      download.textContent = "Download " + extension.toUpperCase() + " video (" + Math.round(blob.size / 1024 / 1024 * 10) / 10 + " MB)";
+      document.getElementById("videoResult").style.display = "block";
+      setStudioStatus("Slide video बन गई। Preview देखें और Download करें।" + (audioBuffer ? " Hindi voice भी जोड़ी गई है।" : " Voice के लिए पहले Generate Hindi Voice दबाएँ।"));
+      if (audioContext) await audioContext.close();
+    } catch (error) {
+      setStudioStatus(error.message || "Video render नहीं हो पाया।", true);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Create Slide Video";
+    }
+  }
+
+  document.getElementById("closeScriptDialog").addEventListener("click", () => scriptDialog.close());
+  scriptDialog.addEventListener("click", event => {
+    if (event.target === scriptDialog) scriptDialog.close();
+  });
+  document.getElementById("generateScriptBtn").addEventListener("click", () => generateScript(false));
+  document.getElementById("saveScriptBtn").addEventListener("click", saveScriptEdits);
+  document.getElementById("generateVoiceBtn").addEventListener("click", generateHindiVoice);
+  document.getElementById("renderVideoBtn").addEventListener("click", createSlideVideo);
 
   document.getElementById("briefForm").addEventListener("submit", async event => {
     event.preventDefault();
@@ -465,6 +911,14 @@
   });
 
   jobsBody.addEventListener("click", async event => {
+    const studioButton = event.target.closest(".open-script");
+    if (studioButton) {
+      const studioRow = studioButton.closest("tr");
+      const studioId = studioRow?.dataset.jobId;
+      if (studioId) await openScriptStudio(studioId);
+      return;
+    }
+
     const deleteButton = event.target.closest(".delete-job");
     if (deleteButton) {
       const deleteRow = deleteButton.closest("tr");
