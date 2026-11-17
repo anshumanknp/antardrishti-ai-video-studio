@@ -31,8 +31,14 @@ const OUTPUT_DIR = path.join(__dirname, "..", "outputs");
 const JOBS_FILE = path.join(DATA_DIR, "jobs.json");
 const GEMINI_TEXT_MODEL = "gemini-3.1-flash-lite";
 const GEMINI_TTS_MODEL = process.env.GEMINI_TTS_MODEL || "gemini-3.1-flash-tts-preview";
-const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-3.1-flash-lite-image";
-const GEMINI_IMAGE_ENABLED = process.env.GEMINI_IMAGE_ENABLED === "true";
+const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || "";
+const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN || "";
+const CLOUDFLARE_IMAGE_MODEL = process.env.CLOUDFLARE_IMAGE_MODEL || "@cf/black-forest-labs/flux-1-schnell";
+const CLOUDFLARE_IMAGE_STEPS = Math.max(1, Math.min(4, Number(process.env.CLOUDFLARE_IMAGE_STEPS || 4)));
+const CLOUDFLARE_IMAGE_DAILY_LIMIT = 150;
+const IMAGE_USAGE_FILE = path.join(DATA_DIR, "cloudflare-image-usage.json");
+const CLOUDFLARE_IMAGE_ENABLED = process.env.CLOUDFLARE_IMAGE_ENABLED === "true" &&
+  Boolean(CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN);
 const FEMALE_TTS_VOICES = new Set(["Kore", "Aoede", "Leda", "Zephyr", "Gacrux"]);
 const MALE_TTS_VOICES = new Set(["Orus", "Puck", "Charon", "Algieba", "Sadaltager"]);
 const DEFAULT_FEMALE_VOICE = "Kore";
@@ -77,47 +83,99 @@ function pcmToWav(pcm, sampleRate = 24000, channels = 1, bitsPerSample = 16) {
   return Buffer.concat([header, pcm]);
 }
 
-async function generateGeminiSceneImage(prompt) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey === "PASTE_YOUR_KEY_HERE") {
-    const error = new Error("Gemini API key configured नहीं है।");
+function readImageUsage() {
+  const today = new Date().toISOString().slice(0, 10);
+  try {
+    const usage = JSON.parse(fs.readFileSync(IMAGE_USAGE_FILE, "utf8"));
+    if (usage.date === today && Number.isFinite(usage.count)) return usage;
+  } catch { /* Start a fresh daily counter. */ }
+  return { date: today, count: 0 };
+}
+
+function writeImageUsage(usage) {
+  fs.writeFileSync(IMAGE_USAGE_FILE, JSON.stringify(usage, null, 2), "utf8");
+}
+
+function reserveImageUsageSlot() {
+  const usage = readImageUsage();
+  if (usage.count >= CLOUDFLARE_IMAGE_DAILY_LIMIT) {
+    const error = new Error(
+      "इस Studio की सुरक्षित daily image limit पूरी हो गई है (" +
+      CLOUDFLARE_IMAGE_DAILY_LIMIT + " images)। यह free-tier limit की सुरक्षा के लिए है; कल UTC reset के बाद फिर कोशिश करें।"
+    );
+    error.status = 429;
+    throw error;
+  }
+  usage.count += 1;
+  writeImageUsage(usage);
+  return usage;
+}
+
+function releaseImageUsageSlot() {
+  const usage = readImageUsage();
+  usage.count = Math.max(0, usage.count - 1);
+  writeImageUsage(usage);
+}
+
+async function generateCloudflareSceneImage(prompt) {
+  if (!CLOUDFLARE_IMAGE_ENABLED) {
+    const error = new Error("Cloudflare Workers AI free image API configured नहीं है। .env में Account ID, API Token और CLOUDFLARE_IMAGE_ENABLED=true सेट करें।");
     error.status = 503;
     throw error;
   }
 
-  const response = await fetch(
-    "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(GEMINI_IMAGE_MODEL) + ":generateContent",
-    {
+  const usageReservation = reserveImageUsageSlot();
+  try {
+    const endpoint =
+      "https://api.cloudflare.com/client/v4/accounts/" +
+      encodeURIComponent(CLOUDFLARE_ACCOUNT_ID) +
+      "/ai/run/" + CLOUDFLARE_IMAGE_MODEL;
+
+    const response = await fetch(endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + CLOUDFLARE_API_TOKEN
+      },
       body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          responseModalities: ["IMAGE"],
-          imageConfig: { aspectRatio: "9:16", imageSize: "1024px" }
-        }
+        prompt,
+        steps: CLOUDFLARE_IMAGE_STEPS
       }),
       signal: AbortSignal.timeout(90000)
+    });
+
+    const contentType = response.headers.get("content-type") || "";
+    if (!response.ok) {
+      const messageBody = contentType.includes("application/json")
+        ? await response.json().catch(() => ({}))
+        : { errors: [{ message: (await response.text().catch(() => "")).slice(0, 300) }] };
+      const apiMessage = messageBody?.errors?.map(item => item.message).filter(Boolean).join("; ");
+      const error = new Error(
+        response.status === 429
+          ? "Cloudflare की daily free AI quota या rate limit पूरी हो गई है। कोई paid fallback नहीं होगा।"
+          : apiMessage || "Cloudflare Workers AI image request failed (HTTP " + response.status + ")."
+      );
+      error.status = response.status === 429 ? 429 : response.status >= 500 ? 502 : response.status;
+      throw error;
     }
-  );
 
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(apiError(response.status, payload));
-    error.status = response.status === 429 ? 429 : response.status >= 500 ? 502 : response.status;
+    if (contentType.startsWith("image/")) {
+      const buffer = Buffer.from(await response.arrayBuffer());
+      return { buffer, mimeType: contentType.split(";")[0] || "image/jpeg" };
+    }
+
+    const payload = await response.json().catch(() => ({}));
+    const base64 = payload?.result?.image || payload?.image;
+    if (typeof base64 !== "string" || !base64.length) {
+      const error = new Error("Cloudflare Workers AI ने image data नहीं लौटाया।");
+      error.status = 502;
+      throw error;
+    }
+    return { buffer: Buffer.from(base64, "base64"), mimeType: "image/jpeg" };
+  } catch (error) {
+    releaseImageUsageSlot();
     throw error;
   }
-
-  const parts = payload?.candidates?.[0]?.content?.parts || [];
-  const imagePart = parts.find(part => part?.inlineData?.data || part?.inline_data?.data);
-  const base64 = imagePart?.inlineData?.data || imagePart?.inline_data?.data;
-  const mimeType = imagePart?.inlineData?.mimeType || imagePart?.inline_data?.mime_type || "image/png";
-  if (typeof base64 !== "string" || !base64.length) {
-    const error = new Error("Gemini Image API ने image data नहीं लौटाया।");
-    error.status = 502;
-    throw error;
-  }
-  return { buffer: Buffer.from(base64, "base64"), mimeType };
 }
 
 function extractGeminiPcm(payload) {
@@ -296,8 +354,11 @@ app.get("/api/health", (_req, res) => {
     geminiConfigured: Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== "PASTE_YOUR_KEY_HERE"),
     textModel: GEMINI_TEXT_MODEL,
     ttsModel: GEMINI_TTS_MODEL,
-    imageGenerationEnabled: GEMINI_IMAGE_ENABLED && Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== "PASTE_YOUR_KEY_HERE"),
-    imageModel: GEMINI_IMAGE_MODEL
+    imageGenerationEnabled: CLOUDFLARE_IMAGE_ENABLED,
+    imageProvider: "Cloudflare Workers AI Free Tier",
+    imageModel: CLOUDFLARE_IMAGE_MODEL,
+    imageDailyLimit: CLOUDFLARE_IMAGE_DAILY_LIMIT,
+    imageUsageToday: readImageUsage().count
   });
 });
 
@@ -472,9 +533,9 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
 app.post("/api/jobs/:id/generate-scene-images", async (req, res) => {
   const { jobs, job } = findJob(req.params.id);
   if (!job) return res.status(404).json({ error: "Video brief not found." });
-  if (!GEMINI_IMAGE_ENABLED) {
+  if (!CLOUDFLARE_IMAGE_ENABLED) {
     return res.status(403).json({
-      error: "Paid image generation अभी बंद है। जब आप तैयार हों, local .env में GEMINI_IMAGE_ENABLED=true करें और server restart करें।"
+      error: "Cloudflare Workers AI free image API configured नहीं है। local .env में Cloudflare Account ID, API Token और CLOUDFLARE_IMAGE_ENABLED=true सेट करें; फिर server restart करें।"
     });
   }
   if (!job.scriptData || !Array.isArray(job.scriptData.scenes) || !job.scriptData.scenes.length) {
@@ -497,17 +558,17 @@ app.post("/api/jobs/:id/generate-scene-images", async (req, res) => {
 
       const visualDirection = String(scenes[index].visual_direction || "").trim();
       const prompt = [
-        "Create one premium, cinematic vertical 9:16 still image to use as the background visual for a Hindi self-awareness educational video.",
+        "Create one premium, cinematic square still image designed to be center-cropped into a vertical 9:16 video background for a Hindi self-awareness educational video.",
         "Video topic: " + safeTopic,
         "Scene " + (index + 1) + " visual direction: " + (visualDirection || "Create a calm, reflective scene that matches the video topic."),
         "Visual style: photorealistic cinematic photography, tasteful composition, natural light, rich but restrained navy and warm neutral color palette, detailed environment, emotionally calm and respectful.",
-        "Composition: vertical 9:16 portrait framing, clear focal subject, enough uncluttered space around the middle and lower third for later Hindi subtitle overlay.",
+        "Composition: square image with the main subject, face and key visual elements kept inside the central vertical 9:16 safe area; the far left and right edges may be cropped. Keep enough uncluttered space around the middle and lower third for later Hindi subtitle overlay.",
         "Do not include any text, letters, words, captions, signs, logos, watermarks, UI, borders or subtitles in the image.",
         "Avoid medical imagery, hospital scenes, distressed patients, diagnostic symbols, spiritual supernatural claims or frightening imagery.",
         "Create a single coherent still image. Do not make a collage, storyboard, split panel or contact sheet."
       ].join("\n");
 
-      const generated = await generateGeminiSceneImage(prompt);
+      const generated = await generateCloudflareSceneImage(prompt);
       const extension = generated.mimeType.includes("jpeg") || generated.mimeType.includes("jpg")
         ? "jpg" : generated.mimeType.includes("webp") ? "webp" : "png";
       const fileName = job.id + "-scene-" + (index + 1) + "." + extension;
@@ -516,7 +577,7 @@ app.post("/api/jobs/:id/generate-scene-images", async (req, res) => {
         sceneIndex: index,
         url: "/outputs/" + fileName,
         mimeType: generated.mimeType,
-        model: GEMINI_IMAGE_MODEL,
+        model: CLOUDFLARE_IMAGE_MODEL,
         generatedAt: new Date().toISOString()
       };
       const priorIndex = savedImages.findIndex(image => image.sceneIndex === index);
