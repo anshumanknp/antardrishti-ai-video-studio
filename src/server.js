@@ -350,6 +350,100 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
   }
 });
 
+app.post("/api/jobs/:id/convert-to-devanagari", async (req, res) => {
+  const { jobs, job } = findJob(req.params.id);
+  if (!job) return res.status(404).json({ error: "Video brief not found." });
+
+  const original = job.scriptData || {
+    title: job.topic,
+    hook: "",
+    voiceover: job.script || "",
+    scenes: [],
+    cta: "",
+    safety_note: ""
+  };
+  if (!original.voiceover && !(original.scenes || []).length) {
+    return res.status(400).json({ error: "पहले इस video की script generate करें।" });
+  }
+
+  const schema = {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      hook: { type: "string" },
+      voiceover: { type: "string" },
+      scenes: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            duration_sec: { type: "integer" },
+            dialogue: { type: "string" },
+            visual_direction: { type: "string" },
+            subtitle: { type: "string" }
+          },
+          required: ["duration_sec", "dialogue", "visual_direction", "subtitle"]
+        }
+      },
+      cta: { type: "string" },
+      safety_note: { type: "string" }
+    },
+    required: ["title", "hook", "voiceover", "scenes", "cta", "safety_note"]
+  };
+
+  try {
+    const payload = await callGemini({
+      model: GEMINI_TEXT_MODEL,
+      input: [
+        "TASK: Convert the existing Hindi video script from Roman Hindi (Hinglish typed in English letters) into proper Devanagari Hindi.",
+        "This is a transliteration and natural-Hindi correction task. Preserve the exact meaning, message, tone, facts, scene order, scene durations and number of scenes. Do not summarise or invent new content.",
+        "All audience-facing fields must be written in Devanagari: title, hook, voiceover, each dialogue, each subtitle and CTA.",
+        "Do not return Roman Hindi. Keep a few genuinely English words/acronyms only when natural, such as AI or PLR. Convert Hindi words such as man, aap, kya, jaante, shakti, pehchanein into मन, आप, क्या, जानते, शक्ति, पहचानें.",
+        "Keep visual_direction exactly as supplied; it is an internal prompt and may remain in English.",
+        "Return only valid JSON matching this schema: " + JSON.stringify(schema),
+        "EXISTING SCRIPT:",
+        JSON.stringify(original)
+      ].join("\n"),
+      response_format: { type: "text", mime_type: "application/json", schema },
+      generation_config: { max_output_tokens: 1600 }
+    });
+
+    const correctedText = getModelText(payload);
+    if (!correctedText) return res.status(502).json({ error: "Hindi conversion से खाली response मिला।" });
+
+    let corrected;
+    try { corrected = JSON.parse(correctedText); }
+    catch { return res.status(502).json({ error: "Hindi conversion का response सही JSON नहीं था। फिर कोशिश करें।" }); }
+
+    if (!corrected.title || !corrected.voiceover || !Array.isArray(corrected.scenes)) {
+      return res.status(502).json({ error: "Conversion में जरूरी script fields नहीं मिले।" });
+    }
+
+    const issues = devanagariIssues(corrected);
+    if (issues.length) {
+      return res.status(422).json({
+        error: "कुछ हिस्से अभी भी Roman Hindi में हैं। Conversion दोबारा करें। प्रभावित हिस्से: " + issues.slice(0, 4).join(", ")
+      });
+    }
+
+    job.scriptData = corrected;
+    job.script = corrected.voiceover;
+    job.voiceFile = "";
+    if (job.status === "approved" || job.status === "exported" || job.status === "published") {
+      job.status = "review";
+    } else {
+      job.status = "script_ready";
+    }
+    job.updatedAt = new Date().toISOString();
+    writeJobs(jobs);
+    res.json({ ok: true, job });
+  } catch (error) {
+    res.status(error.status || 502).json({
+      error: error.message || "देवनागरी conversion नहीं हो पाया।"
+    });
+  }
+});
+
 app.post("/api/jobs/:id/generate-voice", async (req, res) => {
   const { jobs, job } = findJob(req.params.id);
   if (!job) return res.status(404).json({ error: "Video brief not found." });
