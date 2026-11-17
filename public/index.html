@@ -150,6 +150,11 @@
     .modal-status.error { color:var(--red); }
     .voice-player { width:100%; margin-top:10px; }
     .video-result { display:none; margin-top:16px; padding:12px; background:#0c1522; border:1px solid #30435d; border-radius:9px; }
+    .brand-logo-panel { display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:12px; margin:12px 0; background:#19273a; border:1px solid #30435d; border-radius:9px; }
+    .brand-logo-preview { width:110px; height:58px; object-fit:contain; padding:5px; border-radius:6px; background:#0c1522; }
+    .brand-logo-placeholder { width:110px; height:58px; display:grid; place-items:center; color:#91a0b4; border:1px dashed #53647a; border-radius:6px; font-size:10px; }
+    .brand-logo-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; flex:1; }
+    .brand-logo-note { flex-basis:100%; margin:0; color:#9eafc4; font-size:10px; line-height:1.5; }
     .scene-image-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:12px 0; }
     .scene-image-card { min-width:0; padding:8px; background:#19273a; border:1px solid #30435d; border-radius:9px; }
     .scene-image-card img { display:block; width:100%; aspect-ratio:9/16; object-fit:cover; border-radius:6px; background:#0c1522; }
@@ -389,8 +394,9 @@
           </div>
         </div>
         <div class="modal-field">
-          <label for="voiceoverText">HINDI VOICEOVER SCRIPT (EDITABLE)</label>
+          <label for="voiceoverText">HINDI VOICEOVER SCRIPT · THIS TEXT DRIVES THE VOICE</label>
           <textarea id="voiceoverText" maxlength="12000" placeholder="Generate a script to begin…"></textarea>
+          <p class="brand-logo-note">यह narration आवाज़ में बोली जाएगी। Scene के छोटे Hindi subtitles video पर अलग से overlay होंगे। AI background images में Hindi text नहीं डाला जाता ताकि spelling खराब न हो।</p>
         </div>
         <div class="modal-field">
           <label for="scriptCta">CALL TO ACTION</label>
@@ -429,6 +435,16 @@
           </div>
         </div>
         <p class="privacy-note" id="voiceModeNote">एक महिला आवाज़ पूरी narration बोलेगी।</p>
+        <div class="panel-heading"><h2>Brand logo</h2><span class="panel-kicker">USED ON EVERY SLIDE</span></div>
+        <div class="brand-logo-panel">
+          <div id="brandLogoPreviewHost"><div class="brand-logo-placeholder">No logo</div></div>
+          <div class="brand-logo-actions">
+            <input id="brandLogoFile" type="file" accept="image/png,image/jpeg,image/webp" aria-label="Upload brand logo">
+            <button class="secondary-btn" id="uploadBrandLogoBtn" type="button">Upload / Replace Logo</button>
+            <button class="secondary-btn" id="removeBrandLogoBtn" type="button" hidden>Remove Logo</button>
+            <p class="brand-logo-note" id="brandLogoNote">PNG with transparent background works best. Upload once; it will be saved locally and added to every generated video.</p>
+          </div>
+        </div>
         <div class="panel-heading"><h2>Scene visuals</h2><span class="panel-kicker">AI IMAGE · 9:16</span></div>
         <p class="scene-image-note" id="imageGenerationNote">Cloudflare Workers AI free image API configure करने के बाद यहाँ से image generation चालू होगी।</p>
         <div class="modal-actions">
@@ -569,6 +585,8 @@
   let currentVideoUrl = null;
   let currentSubtitleUrl = null;
   let imageGenerationEnabled = false;
+  let brandLogoImage = null;
+  let brandLogoMeta = null;
 
   function setStudioStatus(text, isError = false) {
     studioStatus.textContent = text;
@@ -588,6 +606,110 @@
         <p><b>Visual:</b> ${escapeHtml(scene.visual_direction || "")}</p>
         <small>Subtitle: ${escapeHtml(scene.subtitle || "")}</small>
       </article>`).join("");
+  }
+
+  function renderBrandLogoPreview(logo) {
+    const host = document.getElementById("brandLogoPreviewHost");
+    host.replaceChildren();
+    const removeButton = document.getElementById("removeBrandLogoBtn");
+    if (!logo?.url) {
+      const placeholder = document.createElement("div");
+      placeholder.className = "brand-logo-placeholder";
+      placeholder.textContent = "No logo";
+      host.append(placeholder);
+      removeButton.hidden = true;
+      brandLogoImage = null;
+      brandLogoMeta = null;
+      return;
+    }
+
+    const image = document.createElement("img");
+    image.className = "brand-logo-preview";
+    image.alt = "Antardrishti brand logo";
+    image.src = logo.url + "?v=" + encodeURIComponent(logo.updatedAt || "");
+    host.append(image);
+    brandLogoMeta = logo;
+    removeButton.hidden = false;
+
+    const canvasLogo = new Image();
+    canvasLogo.onload = () => { brandLogoImage = canvasLogo; };
+    canvasLogo.onerror = () => { brandLogoImage = null; };
+    canvasLogo.src = image.src;
+  }
+
+  async function loadBrandLogo() {
+    try {
+      const response = await fetch("/api/brand/logo");
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Logo load नहीं हुआ।");
+      renderBrandLogoPreview(result.logo);
+    } catch (error) {
+      document.getElementById("brandLogoNote").textContent = error.message || "Logo status check नहीं हो पाया।";
+    }
+  }
+
+  async function uploadBrandLogo() {
+    const input = document.getElementById("brandLogoFile");
+    const file = input.files?.[0];
+    if (!file) {
+      setStudioStatus("पहले PNG, JPG या WebP logo file चुनें।", true);
+      return;
+    }
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+      setStudioStatus("Logo केवल PNG, JPG या WebP में upload करें।", true);
+      return;
+    }
+    if (file.size > 1.5 * 1024 * 1024) {
+      setStudioStatus("Logo file 1.5 MB से छोटी रखें।", true);
+      return;
+    }
+
+    const button = document.getElementById("uploadBrandLogoBtn");
+    button.disabled = true;
+    button.textContent = "Uploading…";
+    setStudioStatus("Brand logo local Studio में save हो रहा है…");
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(new Error("Logo file पढ़ी नहीं जा सकी।"));
+        reader.readAsDataURL(file);
+      });
+      const response = await fetch("/api/brand/logo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataUrl })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Logo upload नहीं हुआ।");
+      renderBrandLogoPreview(result.logo);
+      input.value = "";
+      document.getElementById("brandLogoNote").textContent = "Logo save हो गया है। अब यह हर slide के top-right corner में आएगा।";
+      setStudioStatus("Brand logo save हो गया।");
+    } catch (error) {
+      setStudioStatus(error.message || "Logo upload नहीं हुआ।", true);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Upload / Replace Logo";
+    }
+  }
+
+  async function removeBrandLogo() {
+    if (!window.confirm("क्या आप saved brand logo हटाना चाहते हैं?")) return;
+    const button = document.getElementById("removeBrandLogoBtn");
+    button.disabled = true;
+    try {
+      const response = await fetch("/api/brand/logo", { method: "DELETE" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Logo remove नहीं हुआ।");
+      renderBrandLogoPreview(null);
+      document.getElementById("brandLogoNote").textContent = "Logo remove हो गया।";
+      setStudioStatus("Brand logo remove हो गया।");
+    } catch (error) {
+      setStudioStatus(error.message || "Logo remove नहीं हुआ।", true);
+    } finally {
+      button.disabled = false;
+    }
   }
 
   function renderSceneImageGallery(images = []) {
@@ -1010,6 +1132,23 @@
     return entries.join("\n\n") + "\n";
   }
 
+  function drawBrandLogo(context, width, height) {
+    if (!brandLogoImage || !brandLogoImage.complete || !brandLogoImage.naturalWidth) return;
+    const maxWidth = 148;
+    const maxHeight = 92;
+    const scale = Math.min(maxWidth / brandLogoImage.naturalWidth, maxHeight / brandLogoImage.naturalHeight, 1);
+    const logoWidth = brandLogoImage.naturalWidth * scale;
+    const logoHeight = brandLogoImage.naturalHeight * scale;
+    const x = width - 74 - logoWidth;
+    const y = 64;
+    context.save();
+    context.globalAlpha = 0.96;
+    context.shadowColor = "rgba(0,0,0,0.4)";
+    context.shadowBlur = 16;
+    context.drawImage(brandLogoImage, x, y, logoWidth, logoHeight);
+    context.restore();
+  }
+
   async function createSlideVideo() {
     if (!activeJob || !activeScriptData) {
       setStudioStatus("पहले script generate करें।", true);
@@ -1069,6 +1208,8 @@
           image.src = slide.imageUrl + "?v=" + Date.now();
         });
       }
+
+      if (!brandLogoImage) await loadBrandLogo();
 
       const canvasStream = canvas.captureStream(30);
       let mixedStream = canvasStream;
@@ -1142,6 +1283,8 @@
         context.lineTo(1002, 205);
         context.stroke();
 
+        drawBrandLogo(context, w, h);
+
         if (slide.type === "intro") {
           context.fillStyle = "#e2bd78";
           context.font = "600 30px Arial, 'Noto Sans Devanagari', sans-serif";
@@ -1160,9 +1303,6 @@
           context.font = "600 62px Arial, 'Noto Sans Devanagari', sans-serif";
           wrapCanvasText(context, slide.body, 78, 810, 900, 82, 5);
         } else {
-          context.fillStyle = "#d8b576";
-          context.font = "600 29px Arial, sans-serif";
-          context.fillText(slide.title, 78, 500);
           context.fillStyle = "#f5f1e9";
           context.font = "600 58px Arial, 'Noto Sans Devanagari', sans-serif";
           wrapCanvasText(context, slide.body, 78, 730, 900, 84, 6);
@@ -1263,7 +1403,9 @@
   document.getElementById("femaleVoice").addEventListener("change", onVoiceSettingsChanged);
   document.getElementById("maleVoice").addEventListener("change", onVoiceSettingsChanged);
   document.getElementById("generateVoiceBtn").addEventListener("click", generateHindiVoice);
-  document.getElementById("generateImagesBtn").addEventListener("click", generateSceneImages);
+  document.getElementById("uploadBrandLogoBtn").addEventListener("click", uploadBrandLogo);
+  document.getElementById("removeBrandLogoBtn").addEventListener("click", removeBrandLogo);
+    document.getElementById("generateImagesBtn").addEventListener("click", generateSceneImages);
   document.getElementById("autoCreateVideoBtn").addEventListener("click", autoCreateVideo);
   document.getElementById("renderVideoBtn").addEventListener("click", createSlideVideo);
 
@@ -1367,6 +1509,7 @@
   }).format(new Date()).toUpperCase() + " PLAN";
 
   refreshImageGenerationStatus();
+  loadBrandLogo();
   loadJobs().catch(error => {
     jobsBody.innerHTML = "";
     emptyState.hidden = false;
