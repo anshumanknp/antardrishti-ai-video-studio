@@ -430,9 +430,9 @@
         </div>
         <p class="privacy-note" id="voiceModeNote">एक महिला आवाज़ पूरी narration बोलेगी।</p>
         <div class="panel-heading"><h2>Scene visuals</h2><span class="panel-kicker">AI IMAGE · 9:16</span></div>
-        <p class="scene-image-note" id="imageGenerationNote">AI image generation अभी बंद है। यह paid API है; इसे local .env से opt-in करके ही चालू करें।</p>
+        <p class="scene-image-note" id="imageGenerationNote">Cloudflare Workers AI free image API configure करने के बाद यहाँ से image generation चालू होगी।</p>
         <div class="modal-actions">
-          <button class="secondary-btn" id="generateImagesBtn" type="button" disabled>Generate AI Scene Images (Paid)</button>
+          <button class="secondary-btn" id="generateImagesBtn" type="button" disabled>Generate Scene Images (Free API)</button>
         </div>
         <div id="sceneImageGallery" class="scene-image-grid"></div>
         <div class="panel-heading"><h2>Scene-by-scene slide plan</h2><span class="panel-kicker">9:16 VERTICAL</span></div>
@@ -445,6 +445,7 @@
           <button class="secondary-btn" id="saveScriptBtn" type="button">Save Script Edits</button>
           <button class="secondary-btn" id="generateVoiceBtn" type="button">Generate Hindi Voice</button>
           <button class="secondary-btn" id="renderVideoBtn" type="button">Create Slide Video</button>
+          <button class="primary-btn" id="autoCreateVideoBtn" type="button" disabled>Auto Create Video (Free APIs)</button>
         </div>
         <p class="modal-status" id="studioStatus" role="status"></p>
         <audio id="voicePlayer" class="voice-player" controls hidden></audio>
@@ -615,35 +616,41 @@
       const health = await response.json();
       imageGenerationEnabled = response.ok && health.imageGenerationEnabled === true;
       if (imageGenerationEnabled) {
-        note.textContent = "Paid image generation enabled · " + (health.imageModel || "Gemini Image") + " · approx. US$0.0336 per 1K image. Generation starts only when you press the button.";
+        note.textContent = "Cloudflare Workers AI free allocation · 10,000 Neurons/day shared quota. Studio hard cap: " +
+          (health.imageDailyLimit || 150) + " images/day. Quota खत्म होने पर request रुक जाएगी; paid fallback नहीं होगा.";
       } else {
-        note.textContent = "AI image generation अभी बंद है। कोई image API call या charge नहीं होगा। जब तैयार हों, local .env में GEMINI_IMAGE_ENABLED=true करें और server restart करें।";
+        note.textContent = "Cloudflare free image API configure नहीं है। local .env में Account ID, API Token और CLOUDFLARE_IMAGE_ENABLED=true सेट करें। अभी कोई image request नहीं भेजी जाएगी।";
       }
+      button.disabled = !imageGenerationEnabled || !activeScriptData;
+      button.textContent = imageGenerationEnabled ? "Generate / Refresh Scene Images (Free API)" : "Scene Images · Not configured";
+      document.getElementById("autoCreateVideoBtn").disabled = !imageGenerationEnabled || !activeScriptData;
     } catch {
       imageGenerationEnabled = false;
-      note.textContent = "Image generation status check नहीं हो पाया। Paid generation बंद रहेगी।";
+      note.textContent = "Image API status check नहीं हो पाया। Free API configure होने तक generation बंद रहेगी।";
+      button.disabled = true;
+      button.textContent = "Scene Images · Not configured";
+      document.getElementById("autoCreateVideoBtn").disabled = true;
     }
-    button.disabled = !imageGenerationEnabled || !activeScriptData;
-    button.textContent = imageGenerationEnabled ? "Generate / Refresh AI Scene Images (Paid)" : "AI Scene Images · OFF";
   }
 
   async function generateSceneImages() {
     if (!activeJobId || !activeScriptData) return;
     if (!imageGenerationEnabled) {
-      setStudioStatus("Paid image generation अभी बंद है। .env setting enable करने के बाद server restart करें।", true);
+      setStudioStatus("Cloudflare free image API अभी configure नहीं है। .env settings जोड़कर server restart करें।", true);
       return;
     }
     const existing = Array.isArray(activeJob?.sceneImages) ? activeJob.sceneImages : [];
-    const force = existing.length >= (activeScriptData.scenes || []).length;
+    const expected = (activeScriptData.scenes || []).length;
+    const force = existing.length >= expected && expected > 0;
     const warning = force
-      ? "तीनों scene images को दोबारा generate करने पर लगभग US$0.10 तक image charge हो सकता है। क्या आगे बढ़ें?"
-      : "यह up to 3 scene images generate करेगा। Google API पर लगभग US$0.0336 प्रति 1K image charge हो सकता है। क्या आगे बढ़ें?";
+      ? "मौजूदा scene images को Cloudflare Workers AI free daily quota से दोबारा generate करेंगे। Studio limit 150 images/day है। आगे बढ़ें?"
+      : "यह up to " + Math.max(0, expected - existing.length) + " scene images Cloudflare Workers AI free allocation से बनाएगा। Quota shared है; limit पूरी होने पर paid fallback नहीं होगा। आगे बढ़ें?";
     if (!window.confirm(warning)) return;
 
     const button = document.getElementById("generateImagesBtn");
     button.disabled = true;
     button.textContent = "Generating images…";
-    setStudioStatus("Gemini हर scene के लिए अलग 9:16 image बना रहा है…");
+    setStudioStatus("Cloudflare FLUX हर scene के लिए image बना रहा है…");
     try {
       const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/generate-scene-images", {
         method: "POST",
@@ -660,7 +667,105 @@
       setStudioStatus(error.message || "Scene images generate नहीं हो पाईं।", true);
     } finally {
       button.disabled = !imageGenerationEnabled;
-      button.textContent = imageGenerationEnabled ? "Generate / Refresh AI Scene Images (Paid)" : "AI Scene Images · OFF";
+      button.textContent = imageGenerationEnabled ? "Generate / Refresh Scene Images (Free API)" : "Scene Images · Not configured";
+    }
+  }
+
+  async function autoCreateVideo() {
+    if (!activeJobId || !activeJob) return;
+    if (!imageGenerationEnabled) {
+      setStudioStatus("पहले Cloudflare free image API configure करें।", true);
+      return;
+    }
+
+    const button = document.getElementById("autoCreateVideoBtn");
+    button.disabled = true;
+    button.textContent = "Auto creating…";
+    try {
+      const healthResponse = await fetch("/api/health");
+      const health = await healthResponse.json();
+      if (!healthResponse.ok || !health.geminiConfigured) {
+        throw new Error("Gemini API key configured नहीं है। पहले local .env में GEMINI_API_KEY जाँचें।");
+      }
+      if (!health.imageGenerationEnabled) throw new Error("Cloudflare free image API configure नहीं है।");
+
+      if (!activeScriptData) {
+        setStudioStatus("Step 1/4 · Devanagari Hindi script generate हो रही है…");
+        const scriptResponse = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/generate-script", {
+          method: "POST"
+        });
+        const scriptResult = await scriptResponse.json();
+        if (!scriptResponse.ok) throw new Error(scriptResult.error || "Hindi script generate नहीं हुई।");
+        activeJob = scriptResult.job;
+        await loadJobs();
+        displayScript(activeJob);
+      }
+
+      setStudioStatus("Step 2/4 · Script और voice settings save हो रही हैं…");
+      const data = {
+        ...activeScriptData,
+        title: document.getElementById("scriptTitle").value.trim(),
+        hook: document.getElementById("scriptHook").value.trim(),
+        voiceover: document.getElementById("voiceoverText").value.trim(),
+        cta: document.getElementById("scriptCta").value.trim()
+      };
+      const voiceMode = document.getElementById("voiceMode").value;
+      const femaleVoice = document.getElementById("femaleVoice").value;
+      const maleVoice = document.getElementById("maleVoice").value;
+      const patchResponse = await fetch("/api/jobs/" + encodeURIComponent(activeJobId), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scriptData: data, script: data.voiceover, voiceMode, femaleVoice, maleVoice })
+      });
+      const savedJob = await patchResponse.json();
+      if (!patchResponse.ok) throw new Error(savedJob.error || "Script save नहीं हुई।");
+      activeJob = savedJob;
+      activeScriptData = savedJob.scriptData;
+
+      setStudioStatus("Step 3/4 · Gemini Free Tier से Hindi voice generate हो रही है…");
+      const voiceResponse = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/generate-voice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ voiceover: data.voiceover, voiceMode, femaleVoice, maleVoice })
+      });
+      const voiceResult = await voiceResponse.json();
+      if (!voiceResponse.ok) throw new Error(voiceResult.error || "Hindi voice generate नहीं हुई।");
+      activeJob.voiceFile = voiceResult.voiceFile;
+      activeJob.voiceModeLabel = voiceResult.voiceModeLabel;
+
+      const currentImages = Array.isArray(activeJob.sceneImages) ? activeJob.sceneImages : [];
+      const expectedCount = (activeScriptData.scenes || []).length;
+      if (currentImages.length < expectedCount) {
+        const approved = window.confirm(
+          "अब up to " + (expectedCount - currentImages.length) +
+          " scene images Cloudflare Workers AI free daily allocation से बनेंगी। Studio hard cap 150 images/day है। Paid fallback नहीं है। Continue?"
+        );
+        if (!approved) throw new Error("Scene image generation आपने रोक दी। Script और voice save हैं; आप बाद में जारी रख सकते हैं।");
+
+        setStudioStatus("Step 4/4 · Cloudflare free API से scene images बन रही हैं…");
+        const imageResponse = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/generate-scene-images", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ force: false })
+        });
+        const imageResult = await imageResponse.json();
+        if (!imageResponse.ok) throw new Error(imageResult.error || "Scene images generate नहीं हुईं।");
+        activeJob = imageResult.job;
+      }
+
+      await loadJobs();
+      displayScript(activeJob);
+      voicePlayer.src = activeJob.voiceFile + "?v=" + Date.now();
+      voicePlayer.hidden = false;
+      setStudioStatus("Final step · AI scene images, Hindi voice और subtitles के साथ video render हो रही है…");
+      const rendered = await createSlideVideo();
+      if (rendered !== true) throw new Error("Video render पूरा नहीं हुआ। Voice और scene images save हैं; Create Slide Video से फिर कोशिश करें।");
+      setStudioStatus("Auto Create पूरा हुआ। Video और Hindi SRT दोनों download कर सकते हैं।");
+    } catch (error) {
+      setStudioStatus(error.message || "Auto video creation नहीं हो पाई।", true);
+    } finally {
+      button.disabled = !imageGenerationEnabled || !activeScriptData;
+      button.textContent = "Auto Create Video (Free APIs)";
     }
   }
 
@@ -688,6 +793,7 @@
     }
     document.getElementById("renderVideoBtn").disabled = !activeScriptData;
     document.getElementById("generateVoiceBtn").disabled = !activeScriptData;
+    document.getElementById("autoCreateVideoBtn").disabled = !imageGenerationEnabled || !activeScriptData;
   }
 
   async function openScriptStudio(jobId) {
@@ -1136,8 +1242,10 @@
       document.getElementById("videoResult").style.display = "block";
       setStudioStatus("Slide video और Hindi subtitle file तैयार हैं। Video preview करें, फिर दोनों files download करें." + (audioBuffer ? " Hindi voice भी जोड़ी गई है।" : " Voice जोड़ने के लिए पहले Generate Hindi Voice दबाएँ।"));
       if (audioContext) await audioContext.close();
+      return true;
     } catch (error) {
       setStudioStatus(error.message || "Video render नहीं हो पाया।", true);
+      return false;
     } finally {
       button.disabled = false;
       button.textContent = "Create Slide Video";
@@ -1156,6 +1264,7 @@
   document.getElementById("maleVoice").addEventListener("change", onVoiceSettingsChanged);
   document.getElementById("generateVoiceBtn").addEventListener("click", generateHindiVoice);
   document.getElementById("generateImagesBtn").addEventListener("click", generateSceneImages);
+  document.getElementById("autoCreateVideoBtn").addEventListener("click", autoCreateVideo);
   document.getElementById("renderVideoBtn").addEventListener("click", createSlideVideo);
 
   document.getElementById("briefForm").addEventListener("submit", async event => {
