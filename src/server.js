@@ -195,24 +195,24 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
   const schema = {
     type: "object",
     properties: {
-      title: { type: "string" },
-      hook: { type: "string" },
-      voiceover: { type: "string" },
+      title: { type: "string", description: "Hindi title written in Devanagari script. Only a few common English words if essential." },
+      hook: { type: "string", description: "Spoken Hindi hook written in Devanagari script, not Roman Hindi." },
+      voiceover: { type: "string", description: "Complete spoken narration in Devanagari Hindi. Do not write Hindi using English/Roman letters. Keep English words to at most about 10 percent." },
       scenes: {
         type: "array",
         items: {
           type: "object",
           properties: {
             duration_sec: { type: "integer" },
-            dialogue: { type: "string" },
-            visual_direction: { type: "string" },
-            subtitle: { type: "string" }
+            dialogue: { type: "string", description: "Presenter dialogue in Devanagari Hindi, never Roman Hindi." },
+            visual_direction: { type: "string", description: "Internal visual-production prompt. English is allowed here; this text is not spoken and is not shown as a subtitle." },
+            subtitle: { type: "string", description: "Short on-screen Hindi subtitle in Devanagari script, never Roman Hindi." }
           },
           required: ["duration_sec", "dialogue", "visual_direction", "subtitle"]
         }
       },
-      cta: { type: "string" },
-      safety_note: { type: "string" }
+      cta: { type: "string", description: "A short spoken call-to-action in Devanagari Hindi." },
+      safety_note: { type: "string", description: "Internal accuracy note in Hindi or English." }
     },
     required: ["title", "hook", "voiceover", "scenes", "cta", "safety_note"]
   };
@@ -227,14 +227,17 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
     "Aspect ratio: vertical 9:16",
     "",
     "LANGUAGE",
-    "- Around 90% natural spoken Hindi in Devanagari and 10% simple English.",
+    "- IMPORTANT SCRIPT RULE: All audience-facing Hindi must be written in Devanagari script. Never write Hindi in Roman/English letters.",
+    "- The title, hook, voiceover, scene dialogue, subtitles and CTA must be in natural Hindi using Devanagari. Keep English words to at most about 10% and use them only when natural.",
+    "- Correct style example: \"क्या आप जानते हैं कि आपका मन आपके अनुभवों को कैसे प्रभावित करता है?\" Incorrect style: \"Kya aap jaante hain ki aapka man...\"",
     "- Warm, grounded Indian Hindi voice. Use everyday language, not stiff translated Hindi.",
     "- Make the voiceover fit the selected duration.",
     "- Write a strong hook for the first 2–3 seconds.",
-    "- Provide exactly 3 concise scenes. Each scene must include a short dialogue/voiceover, practical visual direction for a slide, and one short subtitle.",
+    "- Provide exactly 3 concise scenes. Each scene must include dialogue in Devanagari Hindi, a short subtitle in Devanagari Hindi, and a practical visual direction.",
+    "- Visual directions are internal production prompts, not audience copy. They may be written in clear English so future image/video models can understand them.",
     "- Move quickly from hook to explanation to one useful takeaway and CTA.",
     "- Visual directions should describe visuals that can be composed from typography, shapes and gradients. Do not ask to draw text inside an AI image.",
-    "- Use the voiceover as exact narration text. Do not include scene headings inside voiceover.",
+    "- Use the Devanagari voiceover as exact narration text. Do not include scene headings inside voiceover.";
     "",
     "SAFETY AND ACCURACY",
     "- Do not claim hypnotherapy diagnoses, cures, or replaces medical or mental-health care.",
