@@ -643,7 +643,7 @@
     const expected = (activeScriptData.scenes || []).length;
     const force = existing.length >= expected && expected > 0;
     const warning = force
-      ? "मौजूदा scene images को Cloudflare Workers AI free daily quota से दोबारा generate करेंगे। Studio limit 150 images/day है। आगे बढ़ें?"
+      ? "मौजूदा scene images को Cloudflare Workers AI free daily quota से दोबारा generate करेंगे। Studio limit 100 images/day है। आगे बढ़ें?"
       : "यह up to " + Math.max(0, expected - existing.length) + " scene images Cloudflare Workers AI free allocation से बनाएगा। Quota shared है; limit पूरी होने पर paid fallback नहीं होगा। आगे बढ़ें?";
     if (!window.confirm(warning)) return;
 
@@ -738,7 +738,7 @@
       if (currentImages.length < expectedCount) {
         const approved = window.confirm(
           "अब up to " + (expectedCount - currentImages.length) +
-          " scene images Cloudflare Workers AI free daily allocation से बनेंगी। Studio hard cap 150 images/day है। Paid fallback नहीं है। Continue?"
+          " scene images Cloudflare Workers AI free daily allocation से बनेंगी। Studio hard cap 100 images/day है। Paid fallback नहीं है। Continue?"
         );
         if (!approved) throw new Error("Scene image generation आपने रोक दी। Script और voice save हैं; आप बाद में जारी रख सकते हैं।");
 
