@@ -747,7 +747,7 @@ app.post("/api/jobs/:id/convert-to-devanagari", async (req, res) => {
         "TASK: Convert the existing Hindi video script from Roman Hindi (Hinglish typed in English letters) into proper Devanagari Hindi.",
         "This is a transliteration and natural-Hindi correction task. Preserve the exact meaning, message, tone, facts, scene order, scene durations and number of scenes. Do not summarise or invent new content.",
         "All audience-facing fields must be written in Devanagari: title, hook, voiceover, each dialogue, each subtitle, all subtitle_segments and CTA.",
-        "If a scene has no subtitle_segments, create 3 or 4 short sequential Devanagari captions from its dialogue. Do not add new claims."
+        "If a scene has no subtitle_segments, create 3 or 4 short sequential Devanagari captions from its dialogue. Do not add new claims.",
         "Do not return Roman Hindi. Keep a few genuinely English words/acronyms only when natural, such as AI or PLR. Convert Hindi words such as man, aap, kya, jaante, shakti, pehchanein into मन, आप, क्या, जानते, शक्ति, पहचानें.",
         "Keep visual_direction exactly as supplied; it is an internal prompt and may remain in English.",
         "Return only valid JSON matching this schema: " + JSON.stringify(schema),
