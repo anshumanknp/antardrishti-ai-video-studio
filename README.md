@@ -15,8 +15,10 @@ A separate, local-first workspace for planning and tracking Antardrishti short-v
 
 ## Current starter scope
 
-- Local dashboard and production queue
+- Responsive dashboard with monthly target and production metrics
+- Searchable and filterable production queue
 - Video brief creation (topic, format, duration)
+- Status tracking from brief created through review, approval and export
 - Hindi-first content settings
 - Mixed Presenter + Cinematic format option
 - Explicit human approval workflow status
