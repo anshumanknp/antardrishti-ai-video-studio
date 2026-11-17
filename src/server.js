@@ -237,7 +237,7 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
     "- Visual directions are internal production prompts, not audience copy. They may be written in clear English so future image/video models can understand them.",
     "- Move quickly from hook to explanation to one useful takeaway and CTA.",
     "- Visual directions should describe visuals that can be composed from typography, shapes and gradients. Do not ask to draw text inside an AI image.",
-    "- Use the Devanagari voiceover as exact narration text. Do not include scene headings inside voiceover.";
+    "- Use the Devanagari voiceover as exact narration text. Do not include scene headings inside voiceover.",
     "",
     "SAFETY AND ACCURACY",
     "- Do not claim hypnotherapy diagnoses, cures, or replaces medical or mental-health care.",
