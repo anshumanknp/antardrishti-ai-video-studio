@@ -37,7 +37,7 @@ The first slide-video version uses locally drawn animated backgrounds, scene tex
 
 ## API models
 
-- Script: `gemini-3.7-flash` (default; free Flash fallback also tries 3.8 and 3.6 on temporary overload)
+- Script: `gemini-3.1-flash-lite` (fast lightweight free-tier default; tries `gemini-3.5-flash-lite` if the first model temporarily overloads)
 - Hindi narration: `gemini-3.1-flash-tts-preview` (TTS)
 
 Free-tier availability, quotas and model names can change. Check Google AI Studio usage before production use. Free-tier content may be used by Google to improve its products, so do not send private client or therapy information.
