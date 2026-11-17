@@ -296,7 +296,7 @@ app.get("/api/health", (_req, res) => {
     geminiConfigured: Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== "PASTE_YOUR_KEY_HERE"),
     textModel: GEMINI_TEXT_MODEL,
     ttsModel: GEMINI_TTS_MODEL,
-    imageGenerationEnabled: GEMINI_IMAGE_ENABLED,
+    imageGenerationEnabled: GEMINI_IMAGE_ENABLED && Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== "PASTE_YOUR_KEY_HERE"),
     imageModel: GEMINI_IMAGE_MODEL
   });
 });
