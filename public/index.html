@@ -396,6 +396,7 @@
         </div>
         <div class="modal-actions">
           <button class="primary-btn" id="generateScriptBtn" type="button">Generate / Regenerate Script</button>
+          <button class="secondary-btn" id="convertScriptBtn" type="button">Convert to देवनागरी</button>
           <button class="secondary-btn" id="saveScriptBtn" type="button">Save Script Edits</button>
           <button class="secondary-btn" id="generateVoiceBtn" type="button">Generate Hindi Voice</button>
           <button class="secondary-btn" id="renderVideoBtn" type="button">Create Slide Video</button>
@@ -589,6 +590,30 @@
     } finally {
       button.disabled = false;
       button.textContent = "Generate / Regenerate Script";
+    }
+  }
+
+  async function convertCurrentScriptToDevanagari() {
+    if (!activeJobId) return;
+    const button = document.getElementById("convertScriptBtn");
+    button.disabled = true;
+    button.textContent = "Converting…";
+    setStudioStatus("पुरानी Roman Hindi को देवनागरी में बदला जा रहा है…");
+    try {
+      const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/convert-to-devanagari", {
+        method: "POST"
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Devanagari conversion नहीं हो पाया।");
+      activeJob = result.job;
+      await loadJobs();
+      displayScript(activeJob);
+      setStudioStatus("पुरानी script अब देवनागरी हिंदी में बदल गई है। Voice दोबारा generate करें।");
+    } catch (error) {
+      setStudioStatus(error.message || "Conversion नहीं हो पाया।", true);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Convert to देवनागरी";
     }
   }
 
@@ -876,6 +901,7 @@
     if (event.target === scriptDialog) scriptDialog.close();
   });
   document.getElementById("generateScriptBtn").addEventListener("click", () => generateScript(false));
+  document.getElementById("convertScriptBtn").addEventListener("click", convertCurrentScriptToDevanagari);
   document.getElementById("saveScriptBtn").addEventListener("click", saveScriptEdits);
   document.getElementById("generateVoiceBtn").addEventListener("click", generateHindiVoice);
   document.getElementById("renderVideoBtn").addEventListener("click", createSlideVideo);
