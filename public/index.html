@@ -760,7 +760,7 @@
       voicePlayer.src = result.voiceFile + "?v=" + Date.now();
       voicePlayer.hidden = false;
       await loadJobs();
-      setStudioStatus("Hindi voice तैयार है। नीचे Play करके सुन सकते हैं।");
+      setStudioStatus("Hindi voice तैयार है · " + (result.voiceModeLabel || "Selected voice mode") + "। नीचे Play करके सुनें।");
     } catch (error) {
       setStudioStatus(error.message || "Voice generation नहीं हो पाई।", true);
     } finally {
