@@ -977,6 +977,6 @@ app.patch("/api/jobs/:id", (req, res) => {
   res.json(job);
 });
 
-app.listen(PORT, () => {
-  console.log("Antardrishti Studio running at http://localhost:" + PORT);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log("Antardrishti Studio running on port " + PORT + " (local network enabled)");
 });
