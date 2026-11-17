@@ -56,7 +56,7 @@ AI scene-image prompts explicitly ask for no words, lettering, numbers, labels, 
 
 ### Video and subtitles
 
-The current video builder uses animated gradients, shapes, title cards and scene subtitles. It adds the generated Hindi audio and can export MP4 or WebM depending on browser support. It also creates a separate scene-timed Hindi `.srt` file for use in an editor or publishing workflow.
+The current video builder uses animated gradients for title cards and generated scene artwork with a slow Ken Burns motion. It starts the narration from the opening hook, overlays the uploaded brand logo, displays short sequential Hindi caption segments in each scene, and creates a matching scene-timed Hindi `.srt` file. It can export MP4 or WebM depending on browser support. The scene caption timings are distributed evenly within their scene; they are not word-level forced alignment.
 
 The Studio can generate one AI image for each of the three scenes using Cloudflare Workers AI's free allocation, then use those images as full-bleed video backgrounds. It uses the `@cf/black-forest-labs/flux-1-schnell` model. Cloudflare's Free Workers plan includes 10,000 AI Neurons per day, shared across the account. The Studio adds its own hard limit of 100 generated images per UTC day and has no paid image-provider fallback. Visual directions are used as image prompts and are not printed as text over the scenes. AI presenter footage and generated cinematic video clips are separate future integrations.
 
