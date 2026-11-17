@@ -48,17 +48,48 @@ Female voice choices: Kore, Aoede, Leda, Zephyr and Gacrux. Male voice choices: 
 
 The current video builder uses animated gradients, shapes, title cards and scene subtitles. It adds the generated Hindi audio and can export MP4 or WebM depending on browser support. It also creates a separate scene-timed Hindi `.srt` file for use in an editor or publishing workflow.
 
-The Studio can optionally generate one AI image for each of the three scenes and use those images as full-bleed video backgrounds. The scene-image generator is disabled by default. It requires an explicit opt-in in the local `.env` file and a paid Gemini image API request. No image request is sent while the flag is false. Visual directions are used as prompts and are not printed as text over the scenes. AI presenter footage and generated cinematic video clips are separate future integrations.
+The Studio can generate one AI image for each of the three scenes using Cloudflare Workers AI's free allocation, then use those images as full-bleed video backgrounds. It uses the `@cf/black-forest-labs/flux-1-schnell` model. Cloudflare's Free Workers plan includes 10,000 AI Neurons per day, shared across the account. The Studio adds its own hard limit of 150 generated images per UTC day and has no paid image-provider fallback. Visual directions are used as image prompts and are not printed as text over the scenes. AI presenter footage and generated cinematic video clips are separate future integrations.
+
+### One-click automation
+
+After Cloudflare is configured, open a video job and press **Auto Create Video (Free APIs)**. The Studio runs these steps in sequence:
+
+1. Generate a Hindi script in Devanagari if one does not exist.
+2. Save the reviewed script and the selected female, male or duet voice settings.
+3. Generate the Hindi narration audio through Gemini TTS.
+4. Generate missing scene images through Cloudflare Workers AI. Existing images are reused.
+5. Render the vertical video with the voice, scene images and Hindi subtitles, then prepare the separate SRT download.
+
+The automation stops on an API or quota error and shows the failed step. It does not fall back to a paid provider. You still review the final video and decide when to publish it.
+
+### Configure Cloudflare free image generation
+
+1. Create or sign in to a Cloudflare account and keep it on the Workers Free plan.
+2. In the Cloudflare Dashboard, open **Workers AI** and select **Use REST API**.
+3. Create a Workers AI API token using the dashboard template and copy the Account ID. The token needs Workers AI access.
+4. Add these values to your local `.env` file in the project root:
+
+```env
+CLOUDFLARE_ACCOUNT_ID=your_account_id
+CLOUDFLARE_API_TOKEN=your_workers_ai_token
+CLOUDFLARE_IMAGE_ENABLED=true
+CLOUDFLARE_IMAGE_MODEL=@cf/black-forest-labs/flux-1-schnell
+CLOUDFLARE_IMAGE_STEPS=4
+```
+
+5. Save the file and restart the app with `npm start`.
+
+Keep the token private. Do not paste it into chat or commit it to GitHub. The image button stays disabled until the account ID, token and enabled flag are present. The current FLUX.1 Schnell endpoint does not accept a portrait-size parameter, so it generates a square image that the video renderer center-crops into 9:16. The image prompt keeps the main subject in the central crop-safe area.
 
 ## API models and usage
 
 - Script and Duet dialogue: `gemini-3.1-flash-lite` (the server can try `gemini-3.5-flash-lite` after a temporary overload).
-- Hindi narration: `gemini-3.1-flash-tts-preview`.
-- Optional scene images: `gemini-3.1-flash-lite-image` (paid API; 1K output only).
+- Hindi narration: `gemini-3.1-flash-tts-preview` (Standard free tier).
+- Optional scene images: Cloudflare Workers AI `@cf/black-forest-labs/flux-1-schnell` (free allocation; requires a Cloudflare Account ID and Workers AI API token).
 - Duet uses Gemini's two-speaker TTS configuration.
 - Blend makes two TTS requests and mixes their PCM audio into one WAV.
 
-TTS requests can take longer than script generation. Blend uses about twice the TTS generation requests of a single voice. Gemini image generation has no API Free Tier; the published Standard price for a 1K image is approximately US$0.0336. Three scene images are approximately US$0.1008 per video (about US$3.02 for 30 videos), before any applicable taxes or price changes. Check the current Google AI Studio pricing and usage before production use. Do not send private client or therapy information to the API.
+TTS requests can take longer than script generation. Blend uses about twice the TTS generation requests of a single voice. Cloudflare Workers AI's Free plan currently includes 10,000 Neurons per day, shared with other Workers AI usage in the same account. The Studio applies a conservative cap of 150 scene-image requests per UTC day and does not automatically switch to a paid image API. When the Cloudflare daily quota is exhausted, image generation stops until the quota resets. Check Cloudflare's current pricing and dashboard usage before production use. Gemini text and TTS free-tier access is also subject to quotas and can change. Do not send private client or therapy information to either API.
 
 ### Enable paid scene images (optional)
 
