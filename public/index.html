@@ -803,14 +803,14 @@
       const text = String(slide.body || "").trim();
       if (text) {
         entries.push(
-          String(entries.length + 1) + "\\n" +
-          formatSrtTime(cursor) + " --> " + formatSrtTime(cursor + slide.duration) + "\\n" +
+          String(entries.length + 1) + "\n" +
+          formatSrtTime(cursor) + " --> " + formatSrtTime(cursor + slide.duration) + "\n" +
           text
         );
       }
       cursor += slide.duration;
     }
-    return entries.join("\\n\\n") + "\\n";
+    return entries.join("\n\n") + "\n";
   }
 
   async function createSlideVideo() {
