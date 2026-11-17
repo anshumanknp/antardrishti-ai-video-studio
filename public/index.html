@@ -624,6 +624,7 @@
       note.textContent = "Image generation status check नहीं हो पाया। Paid generation बंद रहेगी।";
     }
     button.disabled = !imageGenerationEnabled || !activeScriptData;
+    button.disabled = !imageGenerationEnabled || !activeScriptData;
     button.textContent = imageGenerationEnabled ? "Generate / Refresh AI Scene Images (Paid)" : "AI Scene Images · OFF";
   }
 
