@@ -1,5 +1,7 @@
 node_modules/
 .env
 data/jobs.json
+outputs/*
+!outputs/.gitkeep
 *.log
 .DS_Store
