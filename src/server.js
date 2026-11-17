@@ -95,7 +95,7 @@ function devanagariIssues(scriptData) {
     ])
   ];
 
-  const acronymPattern = /\\b(?:AI|PLR|CTA|MP4|SEO|TTS|API|USA|TV|OK|FAQ)\\b/g;
+  const acronymPattern = /\b(?:AI|PLR|CTA|MP4|SEO|TTS|API|USA|TV|OK|FAQ)\b/g;
   const issues = [];
   for (const [label, value] of audienceText) {
     if (typeof value !== "string" || !value.trim()) {
@@ -103,9 +103,9 @@ function devanagariIssues(scriptData) {
       continue;
     }
     const withoutAcronyms = value.replace(acronymPattern, "");
-    const letters = withoutAcronyms.match(/\\p{L}/gu) || [];
+    const letters = withoutAcronyms.match(/\p{L}/gu) || [];
     if (letters.length < 8) continue;
-    const devanagari = withoutAcronyms.match(/\\p{Script=Devanagari}/gu) || [];
+    const devanagari = withoutAcronyms.match(/\p{Script=Devanagari}/gu) || [];
     const ratio = devanagari.length / letters.length;
     if (ratio < 0.58) issues.push(label + " is not predominantly Devanagari Hindi");
   }
