@@ -31,6 +31,10 @@ const OUTPUT_DIR = path.join(__dirname, "..", "outputs");
 const JOBS_FILE = path.join(DATA_DIR, "jobs.json");
 const GEMINI_TEXT_MODEL = "gemini-3.1-flash-lite";
 const GEMINI_TTS_MODEL = process.env.GEMINI_TTS_MODEL || "gemini-3.1-flash-tts-preview";
+const FEMALE_TTS_VOICES = new Set(["Kore", "Aoede", "Leda", "Zephyr", "Gacrux"]);
+const MALE_TTS_VOICES = new Set(["Orus", "Puck", "Charon", "Algieba", "Sadaltager"]);
+const DEFAULT_FEMALE_VOICE = "Kore";
+const DEFAULT_MALE_VOICE = "Orus";
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(OUTPUT_DIR, { recursive: true });
@@ -69,6 +73,70 @@ function pcmToWav(pcm, sampleRate = 24000, channels = 1, bitsPerSample = 16) {
   header.write("data", 36);
   header.writeUInt32LE(pcm.length, 40);
   return Buffer.concat([header, pcm]);
+}
+
+function extractGeminiPcm(payload) {
+  const parts = payload?.candidates?.[0]?.content?.parts || [];
+  const audioPart = parts.find(part => part?.inlineData?.data || part?.inline_data?.data);
+  const base64 = audioPart?.inlineData?.data || audioPart?.inline_data?.data;
+  if (typeof base64 !== "string" || !base64.length) return null;
+  return Buffer.from(base64, "base64");
+}
+
+async function generateGeminiTtsPcm(input, speechConfig) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey === "PASTE_YOUR_KEY_HERE") {
+    const error = new Error("Gemini API key configured नहीं है। Project folder की .env file में GEMINI_API_KEY डालें और server restart करें।");
+    error.status = 503;
+    throw error;
+  }
+
+  const response = await fetch(
+    "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(GEMINI_TTS_MODEL) + ":generateContent",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: input }] }],
+        generationConfig: {
+          responseModalities: ["AUDIO"],
+          speechConfig: { languageCode: "hi-IN", ...speechConfig }
+        }
+      }),
+      signal: AbortSignal.timeout(90000)
+    }
+  );
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(apiError(response.status, payload));
+    error.status = response.status === 429 ? 429 : response.status >= 500 ? 502 : response.status;
+    throw error;
+  }
+
+  const pcm = extractGeminiPcm(payload);
+  if (!pcm || !pcm.length) {
+    const error = new Error("Gemini TTS ने audio data नहीं लौटाया।");
+    error.status = 502;
+    throw error;
+  }
+  return pcm;
+}
+
+function mixPcmMono(primary, secondary, primaryGain = 0.72, secondaryGain = 0.28) {
+  const primaryLength = primary.length - (primary.length % 2);
+  const secondaryLength = secondary.length - (secondary.length % 2);
+  const frameCount = Math.max(primaryLength, secondaryLength) / 2;
+  const output = Buffer.alloc(frameCount * 2);
+
+  for (let frame = 0; frame < frameCount; frame++) {
+    const offset = frame * 2;
+    const first = frame * 2 < primaryLength ? primary.readInt16LE(offset) : 0;
+    const second = frame * 2 < secondaryLength ? secondary.readInt16LE(offset) : 0;
+    const mixed = Math.max(-32768, Math.min(32767, Math.round(first * primaryGain + second * secondaryGain)));
+    output.writeInt16LE(mixed, offset);
+  }
+  return output;
 }
 
 function getModelText(payload) {
@@ -206,6 +274,9 @@ app.post("/api/jobs", (req, res) => {
     script: "",
     scriptData: null,
     voiceFile: "",
+    voiceMode: "female",
+    femaleVoice: DEFAULT_FEMALE_VOICE,
+    maleVoice: DEFAULT_MALE_VOICE,
     videoFile: "",
     platforms: ["Instagram", "Facebook", "YouTube Shorts"],
     approvalRequired: true,
@@ -447,6 +518,7 @@ app.post("/api/jobs/:id/convert-to-devanagari", async (req, res) => {
 app.post("/api/jobs/:id/generate-voice", async (req, res) => {
   const { jobs, job } = findJob(req.params.id);
   if (!job) return res.status(404).json({ error: "Video brief not found." });
+
   const narration = typeof req.body?.voiceover === "string"
     ? req.body.voiceover.trim()
     : String(job.scriptData?.voiceover || job.script || "").trim();
@@ -454,34 +526,138 @@ app.post("/api/jobs/:id/generate-voice", async (req, res) => {
   if (!narration) return res.status(400).json({ error: "पहले Hindi script generate करें।" });
   if (narration.length > 12000) return res.status(400).json({ error: "Voiceover 12,000 characters से छोटा रखें।" });
 
-  try {
-    const payload = await callGemini({
-      model: GEMINI_TTS_MODEL,
-      input: "Speak the following script in natural, warm, clear Indian Hindi. Use a calm, friendly educational narrator style, medium pace, and accurate Hindi pronunciation. Preserve the words; do not translate or add an introduction.\n\n" + narration,
-      response_format: { type: "audio" },
-      generation_config: { speech_config: [{ voice: process.env.GEMINI_TTS_VOICE || "Kore" }] }
-    });
+  const allowedModes = new Set(["female", "male", "duet", "mix"]);
+  const voiceMode = allowedModes.has(req.body?.voiceMode) ? req.body.voiceMode
+    : allowedModes.has(job.voiceMode) ? job.voiceMode : "female";
+  const femaleVoice = FEMALE_TTS_VOICES.has(req.body?.femaleVoice) ? req.body.femaleVoice
+    : FEMALE_TTS_VOICES.has(job.femaleVoice) ? job.femaleVoice : DEFAULT_FEMALE_VOICE;
+  const maleVoice = MALE_TTS_VOICES.has(req.body?.maleVoice) ? req.body.maleVoice
+    : MALE_TTS_VOICES.has(job.maleVoice) ? job.maleVoice : DEFAULT_MALE_VOICE;
 
-    const lastModelStep = [...(payload.steps || [])].reverse().find(step => step.type === "model_output");
-    const audioBlock = [...(lastModelStep?.content || [])].reverse().find(block => block.type === "audio");
-    const audioData = payload?.output_audio?.data || audioBlock?.data;
-    if (typeof audioData !== "string" || !audioData.length) {
-      return res.status(502).json({ error: "Gemini TTS ने audio data नहीं लौटाया।" });
+  try {
+    let pcm;
+    let voiceModeLabel = "Female narrator";
+
+    if (voiceMode === "female" || voiceMode === "male") {
+      const voiceName = voiceMode === "female" ? femaleVoice : maleVoice;
+      pcm = await generateGeminiTtsPcm(
+        "Speak the following script in natural, warm, clear Indian Hindi. Use a calm, friendly educational narrator style, medium pace, and accurate Hindi pronunciation. Preserve the words; do not translate or add an introduction.\n\n" + narration,
+        { voiceConfig: { prebuiltVoiceConfig: { voiceName } } }
+      );
+      voiceModeLabel = voiceMode === "female" ? "Female narrator · " + voiceName : "Male narrator · " + voiceName;
+    } else if (voiceMode === "duet") {
+      const dialogueSchema = {
+        type: "object",
+        properties: {
+          turns: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                speaker: { type: "string", enum: ["Female", "Male"] },
+                text: { type: "string" }
+              },
+              required: ["speaker", "text"]
+            }
+          }
+        },
+        required: ["turns"]
+      };
+      const dialoguePayload = await callGemini({
+        model: GEMINI_TEXT_MODEL,
+        input: [
+          "Convert the following Hindi narration into a natural two-person spoken conversation for a short educational video.",
+          "Create 6 to 8 concise turns. Alternate speakers, starting with Female, then Male. Use only the speaker labels Female and Male.",
+          "Preserve every main idea and factual meaning. Do not add claims, statistics, advice or new information. Do not omit the main takeaway or call to action.",
+          "Each turn's spoken text must be natural Hindi in Devanagari script. Never write Roman Hindi. Keep genuinely English words only when needed.",
+          "Return JSON only with a turns array matching the schema.",
+          "NARRATION:", narration
+        ].join("\n"),
+        response_format: { type: "text", mime_type: "application/json", schema: dialogueSchema },
+        generation_config: { max_output_tokens: 1200 }
+      });
+      let dialogue;
+      try { dialogue = JSON.parse(getModelText(dialoguePayload)); }
+      catch {
+        return res.status(502).json({ error: "Duet dialogue तैयार नहीं हो पाया। फिर कोशिश करें।" });
+      }
+      const turns = Array.isArray(dialogue?.turns) ? dialogue.turns : [];
+      if (turns.length < 4 || turns.length > 10 || turns.some(turn =>
+        !["Female", "Male"].includes(turn.speaker) ||
+        typeof turn.text !== "string" || !turn.text.trim()
+      )) {
+        return res.status(502).json({ error: "Duet dialogue में speaker turns सही नहीं मिले। फिर कोशिश करें।" });
+      }
+      const languageIssues = [];
+      turns.forEach((turn, index) => {
+        const probe = {
+          title: "जाँच",
+          hook: "जाँच",
+          voiceover: turn.text,
+          cta: "जाँच",
+          scenes: []
+        };
+        if (devanagariIssues(probe).length) languageIssues.push(index + 1);
+      });
+      if (languageIssues.length) {
+        return res.status(422).json({ error: "Duet dialogue में कुछ Roman Hindi text मिला। फिर कोशिश करें।" });
+      }
+
+      const dialogueText = [
+        "TTS the following natural Hindi conversation between a female and a male speaker.",
+        "Use a calm, clear, warm Indian Hindi delivery. Speak only the words after each speaker label. Do not read the labels aloud.",
+        ...turns.map(turn => turn.speaker + ": " + turn.text)
+      ].join("\n");
+      pcm = await generateGeminiTtsPcm(dialogueText, {
+        multiSpeakerVoiceConfig: {
+          speakerVoiceConfigs: [
+            { speaker: "Female", voiceConfig: { prebuiltVoiceConfig: { voiceName: femaleVoice } } },
+            { speaker: "Male", voiceConfig: { prebuiltVoiceConfig: { voiceName: maleVoice } } }
+          ]
+        }
+      });
+      job.voiceoverTurns = turns;
+      voiceModeLabel = "Duet · " + femaleVoice + " + " + maleVoice;
+    } else {
+      const [femalePcm, malePcm] = await Promise.all([
+        generateGeminiTtsPcm(
+          "Speak the following Hindi script in a calm, warm, clear Indian Hindi narrator style. Preserve the words exactly.\n\n" + narration,
+          { voiceConfig: { prebuiltVoiceConfig: { voiceName: femaleVoice } } }
+        ),
+        generateGeminiTtsPcm(
+          "Speak the following Hindi script in a calm, warm, clear Indian Hindi narrator style. Preserve the words exactly.\n\n" + narration,
+          { voiceConfig: { prebuiltVoiceConfig: { voiceName: maleVoice } } }
+        )
+      ]);
+      // Female voice is foreground; male voice is mixed underneath at a lower level.
+      pcm = mixPcmMono(femalePcm, malePcm, 0.72, 0.28);
+      voiceModeLabel = "Blended voices · " + femaleVoice + " + " + maleVoice;
     }
 
-    const pcm = Buffer.from(audioData, "base64");
-    const wav = pcmToWav(pcm, Number(payload?.output_audio?.sample_rate || audioBlock?.sample_rate || 24000));
+    const wav = pcmToWav(pcm, 24000);
     const safeFile = job.id + ".wav";
     fs.writeFileSync(path.join(OUTPUT_DIR, safeFile), wav);
     job.script = narration;
     if (job.scriptData) job.scriptData.voiceover = narration;
     job.voiceFile = "/outputs/" + safeFile;
+    job.voiceMode = voiceMode;
+    job.femaleVoice = femaleVoice;
+    job.maleVoice = maleVoice;
+    job.voiceModeLabel = voiceModeLabel;
     job.updatedAt = new Date().toISOString();
     writeJobs(jobs);
-    res.json({ ok: true, voiceFile: job.voiceFile, mimeType: "audio/wav" });
+    res.json({
+      ok: true,
+      voiceFile: job.voiceFile,
+      mimeType: "audio/wav",
+      voiceMode: job.voiceMode,
+      voiceModeLabel
+    });
   } catch (error) {
     res.status(error.status || 502).json({
-      error: error.name === "TimeoutError" ? "Voice generation में समय लग गया। फिर कोशिश करें।" : error.message || "Gemini TTS से connect नहीं हो पाया।"
+      error: error.name === "TimeoutError" || error.name === "AbortError"
+        ? "Voice generation में समय लग गया। फिर कोशिश करें।"
+        : error.message || "Gemini TTS से connect नहीं हो पाया।"
     });
   }
 });
@@ -507,6 +683,9 @@ app.patch("/api/jobs/:id", (req, res) => {
   for (const [key, value] of Object.entries(req.body || {})) {
     if (allowedStrings.has(key) && typeof value === "string") job[key] = value.slice(0, 30000);
   }
+  if (["female", "male", "duet", "mix"].includes(req.body?.voiceMode)) job.voiceMode = req.body.voiceMode;
+  if (FEMALE_TTS_VOICES.has(req.body?.femaleVoice)) job.femaleVoice = req.body.femaleVoice;
+  if (MALE_TTS_VOICES.has(req.body?.maleVoice)) job.maleVoice = req.body.maleVoice;
   if (req.body?.scriptData && typeof req.body.scriptData === "object" && !Array.isArray(req.body.scriptData)) {
     job.scriptData = req.body.scriptData;
     if (typeof req.body.scriptData.voiceover === "string") job.script = req.body.scriptData.voiceover.slice(0, 30000);
