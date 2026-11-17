@@ -44,6 +44,16 @@ The Studio provides four modes:
 
 Female voice choices: Kore, Aoede, Leda, Zephyr and Gacrux. Male voice choices: Orus, Puck, Charon, Algieba and Sadaltager. The available voice names and gender labels come from Google's Gemini TTS voice list.
 
+### Brand logo
+
+- Open Script Studio and go to **Brand logo**.
+- Choose a PNG, JPG or WebP image up to 1.5 MB, then select **Upload / Replace Logo**.
+- A transparent PNG is recommended. The logo is saved locally in the project's `outputs/` folder and reused on future videos from this Studio.
+- The renderer places the logo in the top-right corner of every slide. Use a compact, horizontal logo with a transparent background for the cleanest result.
+- Use **Remove Logo** to delete the saved logo. The logo is separate from generated AI scene art, so it stays sharp and does not get distorted by the image model.
+
+AI scene-image prompts explicitly ask for no words, lettering, numbers, labels, scene names or logos. The video renderer adds the scene caption and brand logo after the background image is generated. Existing scene images made with older prompts may still have unwanted lettering; use **Generate / Refresh Scene Images (Free API)** once to replace them.
+
 ### Video and subtitles
 
 The current video builder uses animated gradients, shapes, title cards and scene subtitles. It adds the generated Hindi audio and can export MP4 or WebM depending on browser support. It also creates a separate scene-timed Hindi `.srt` file for use in an editor or publishing workflow.
