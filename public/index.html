@@ -1865,7 +1865,11 @@
       subtitleDownload.textContent = "Download Hindi subtitles (.srt)";
 
       document.getElementById("videoResult").style.display = "block";
-      setStudioStatus("Slide video और Hindi subtitle file तैयार हैं। Video preview करें, फिर दोनों files download करें." + (audioBuffer ? " Hindi voice भी जोड़ी गई है।" : " Voice जोड़ने के लिए पहले Generate Hindi Voice दबाएँ।"));
+      setStudioStatus(
+        "Slide video और Hindi subtitle file तैयार हैं · final video लगभग " +
+        totalSec.toFixed(1) + " sec। " +
+        (audioBuffer ? "Video की अवधि actual Hindi voice के अनुसार रखी गई है।" : "Voice के बिना selected duration इस्तेमाल हुई है।")
+      );
       if (audioContext) await audioContext.close();
       return true;
     } catch (error) {
