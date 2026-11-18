@@ -32,8 +32,9 @@ export function classifyCloudflareImageError({
       "। Cloudflare Dashboard में usage जाँचें; allocation उपलब्ध होने पर ही image generation फिर चलाएँ। कोई paid fallback नहीं होगा।";
   } else if (isCapacity) {
     message = "Cloudflare Workers AI में इस समय model capacity उपलब्ध नहीं है" +
-      (code ? " (Cloudflare error " + code + ")" : " (temporary capacity error)") +
-      "। थोड़ी देर बाद केवल एक बार फिर कोशिश करें। बार-बार retry न करें.";
+      (code === "3040" ? " (temporary 3040; Cloudflare error 3040)" :
+        code ? " (Cloudflare error " + code + ")" : " (temporary capacity error)") +
+      "। थोड़ी देर बाद केवल एक बार फिर कोशिश करें। बार-बार retry न करें।";
   } else if (Number(httpStatus) === 429) {
     message = providerMessage
       ? "Cloudflare ने request पर rate limit लगाई (HTTP 429): " + providerMessage
