@@ -5,6 +5,7 @@ import fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import { readJobs as readJobStore, writeJobs as writeJobStore } from "./job-store.js";
 import { getRecommendedSceneCount, preserveSceneProductionFields, validateScriptData } from "./script-validation.js";
+import { buildCloudflareScenePrompt } from "./image-prompt.js";
 import { buildBufferVideoPostInput } from "./buffer-api.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -898,22 +899,13 @@ app.post("/api/jobs/:id/generate-scene-images", async (req, res) => {
       const shotType = String(scenes[index].shot_type || "medium shot").trim();
       const cameraMovement = String(scenes[index].camera_movement || "gentle push-in").trim();
       const dialogueContext = String(scenes[index].dialogue || scenes[index].subtitle || "").trim().slice(0, 500);
-      const prompt = [
-        "Create one premium, cinematic square still image for a vertical 9:16 Indian Hindi self-awareness video.",
-        "Video topic: " + safeTopic,
-        "Scene dialogue context: " + dialogueContext,
-        "Exact visual direction (follow this before adding anything else): " + (visualDirection || "Create a calm, reflective scene that matches the video topic."),
-        "Shot framing requested by the director: " + shotType + ". Compose the image to visibly match this shot type; do not default every person to a medium portrait.",
-        "Planned camera movement for the editor: " + cameraMovement + ". Compose with enough visual room for this movement.",
-        "INDIAN CONTEXT: When a person or real-world location is relevant, use natural-looking Indian people and an authentic contemporary Indian setting. Avoid generic Western stock-photo faces, styling and locations. Do not use stereotypes.",
-        "ABSTRACT / OBJECT RULE: If the exact visual direction calls for an abstract animation, glowing line, knot, symbol, object or graphic, create only that abstract/object visual. Do not add a person, face or unrelated portrait.",
-        "Visual style: tasteful cinematic composition, natural light, restrained navy and warm neutral palette, detailed environment, emotionally calm and respectful. Follow the visual direction if it requests a different art treatment.",
-        "Composition: square image designed for a centered 9:16 crop. Keep essential subject matter within the central 55 percent of the image width. Respect the requested shot framing. Keep the caption-safe central/lower area visually calm; never place important detail at the extreme edges.",
-        "IMPORTANT: The image must contain no writing at all. Do not draw words, letters, numbers, labels, signs, titles, headings, captions, subtitles, logos, watermarks, scene names, scene numbers, UI or borders.",
-        "Do not write or depict the words Scene, Scene 1, Scene 2, Scene 3, or any numbered scene label.",
-        "Avoid medical imagery, hospital scenes, distressed patients, diagnostic symbols, supernatural claims or frightening imagery.",
-        "Create one coherent photograph, not a collage, storyboard, split panel, contact sheet or poster."
-      ].join("\n");
+      const prompt = buildCloudflareScenePrompt({
+        topic: safeTopic,
+        dialogueContext,
+        visualDirection: visualDirection || "Create a calm, reflective scene that matches the video topic.",
+        shotType,
+        cameraMovement
+      });
 
       const generated = await generateCloudflareSceneImage(prompt);
       const extension = generated.mimeType.includes("jpeg") || generated.mimeType.includes("jpg")
