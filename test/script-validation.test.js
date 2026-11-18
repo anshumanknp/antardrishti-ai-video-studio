@@ -39,6 +39,15 @@ test("rejects a scene missing production shot instructions", () => {
   assert.ok(issues.some(issue => issue.includes("camera_movement")));
 });
 
+test("rejects scripts missing any production-planning field", () => {
+  for (const field of ["shot_type", "camera_movement", "transition", "audio_cue"]) {
+    const script = validScript();
+    delete script.scenes[0][field];
+    const issues = validateScriptData(script, 30);
+    assert.ok(issues.some(issue => issue.includes(field)), "Expected validation to reject missing " + field);
+  }
+});
+
 test("rejects missing scene copy and invalid subtitle segments", () => {
   const script = validScript();
   script.scenes[1].dialogue = " ";
