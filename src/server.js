@@ -535,8 +535,8 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
     "- Warm, grounded Indian Hindi voice. Use everyday language, not stiff translated Hindi.",
     "- Make the voiceover fit the selected duration.",
     "- Write a strong hook for the first 2–3 seconds.",
-    "- Provide exactly 3 concise scenes. Each scene must include dialogue in Devanagari Hindi, a short subtitle in Devanagari Hindi, 3 or 4 sequential subtitle_segments in Devanagari Hindi, and a practical visual direction.
-    - For every scene, specify shot_type, camera_movement, transition and audio_cue. Use simple production choices that can be executed in a lightweight vertical-video editor.",
+    "- Provide exactly 3 concise scenes. Each scene must include dialogue in Devanagari Hindi, a short subtitle in Devanagari Hindi, 3 or 4 sequential subtitle_segments in Devanagari Hindi, and a practical visual direction.",
+    "- For every scene, specify shot_type, camera_movement, transition and audio_cue. Use simple production choices that can be executed in a lightweight vertical-video editor.",
     "- Each subtitle segment should be a natural spoken phrase of about 3–7 words. Keep the segments in the same order as the dialogue so they can appear one after another during that scene.",
     "- Do not put Scene 1, Scene 2, Scene 3, scene numbers, headings or labels in dialogue or subtitles.",
     "- Visual directions are internal production prompts, not audience copy. They may be written in clear English so future image/video models can understand them.",
