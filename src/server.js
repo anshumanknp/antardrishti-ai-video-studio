@@ -1180,12 +1180,17 @@ app.post("/api/jobs/:id/generate-voice", async (req, res) => {
       voiceModeLabel = "Blended voices · " + femaleVoice + " + " + maleVoice;
     }
 
+    const audioDurationSec = pcm.length / (24000 * 2);
+    const durationToleranceSec = Math.max(2, Number(job.duration || 45) * 0.08);
+    const durationMatchesTarget = Math.abs(audioDurationSec - Number(job.duration || 45)) <= durationToleranceSec;
     const wav = pcmToWav(pcm, 24000);
     const safeFile = job.id + ".wav";
     fs.writeFileSync(path.join(OUTPUT_DIR, safeFile), wav);
     job.script = narration;
     if (job.scriptData) job.scriptData.voiceover = narration;
     job.voiceFile = "/outputs/" + safeFile;
+    job.voiceDurationSec = Number(audioDurationSec.toFixed(2));
+    job.voiceDurationMatchesTarget = durationMatchesTarget;
     job.voiceMode = voiceMode;
     job.femaleVoice = femaleVoice;
     job.maleVoice = maleVoice;
@@ -1197,7 +1202,10 @@ app.post("/api/jobs/:id/generate-voice", async (req, res) => {
       voiceFile: job.voiceFile,
       mimeType: "audio/wav",
       voiceMode: job.voiceMode,
-      voiceModeLabel
+      voiceModeLabel,
+      audioDurationSec: job.voiceDurationSec,
+      targetDurationSec: job.duration,
+      durationMatchesTarget
     });
   } catch (error) {
     res.status(error.status || 502).json({
@@ -1228,6 +1236,10 @@ app.patch("/api/jobs/:id", (req, res) => {
   const jobs = readJobs();
   const job = jobs.find(item => item.id === req.params.id);
   if (!job) return res.status(404).json({ error: "Job not found." });
+  const previousVoiceover = String(job.scriptData?.voiceover || job.script || "");
+  const previousVisualPlan = JSON.stringify((job.scriptData?.scenes || []).map(scene =>
+    [scene.visual_direction, scene.shot_type]
+  ));
 
   for (const [key, value] of Object.entries(req.body || {})) {
     if (allowedStrings.has(key) && typeof value === "string") job[key] = value.slice(0, 30000);
@@ -1246,8 +1258,27 @@ app.patch("/api/jobs/:id", (req, res) => {
   if (FEMALE_TTS_VOICES.has(req.body?.femaleVoice)) job.femaleVoice = req.body.femaleVoice;
   if (MALE_TTS_VOICES.has(req.body?.maleVoice)) job.maleVoice = req.body.maleVoice;
   if (req.body?.scriptData && typeof req.body.scriptData === "object" && !Array.isArray(req.body.scriptData)) {
+    const nextVoiceover = typeof req.body.scriptData.voiceover === "string"
+      ? req.body.scriptData.voiceover.slice(0, 30000)
+      : previousVoiceover;
+    const nextVisualPlan = JSON.stringify((req.body.scriptData.scenes || []).map(scene =>
+      [scene.visual_direction, scene.shot_type]
+    ));
+    if (nextVoiceover !== previousVoiceover) {
+      if (job.voiceFile) fs.rmSync(path.join(OUTPUT_DIR, path.basename(job.voiceFile)), { force: true });
+      job.voiceFile = "";
+      job.voiceDurationSec = null;
+      job.voiceDurationMatchesTarget = null;
+    }
+    if (nextVisualPlan !== previousVisualPlan) {
+      for (const image of job.sceneImages || []) {
+        const fileName = path.basename(String(image.url || ""));
+        if (fileName.startsWith(job.id + "-scene-")) fs.rmSync(path.join(OUTPUT_DIR, fileName), { force: true });
+      }
+      job.sceneImages = [];
+    }
     job.scriptData = req.body.scriptData;
-    if (typeof req.body.scriptData.voiceover === "string") job.script = req.body.scriptData.voiceover.slice(0, 30000);
+    if (typeof req.body.scriptData.voiceover === "string") job.script = nextVoiceover;
   }
   job.updatedAt = new Date().toISOString();
   writeJobs(jobs);
