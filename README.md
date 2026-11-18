@@ -99,13 +99,16 @@ Each field can be edited and copied independently. Script regeneration or Devana
 3. Keep the key private and never commit `.env` to GitHub.
 4. Restart the Studio with `npm start`.
 5. Open Script Studio and select **Connect / Refresh Buffer**. The app reads your Buffer organizations and connected Facebook, Instagram and YouTube channels.
-6. Select a channel, provide a direct public HTTPS URL for the finished video, and select **Add Video to Buffer Queue**.
+6. Review the final video and all three platform-copy fields. In the main dashboard, change the job status to **Approved** only after that review.
+7. In Script Studio, select a channel, provide a direct public HTTPS URL for the finished video, and select **Add Video to Buffer Queue**.
 
-The Buffer API is available on Buffer Free and paid plans. Buffer's current Free API allowance is 1,000 requests per connected channel every 30 days, up to 3,000 total requests.
+The server rejects Buffer queue requests unless the job status is exactly **Approved**. Editing the script, platform copy, voice or scene images after approval returns an approved/exported job to **Needs review**. The Studio records successful Buffer queue posts against the job and blocks the same video URL from being queued twice to the same channel. One video can still be queued to different channels. A successful queue action means Buffer accepted the scheduled post; it does not mean the post has already published.
 
-**Video hosting requirement:** Buffer's API does not provide a video-file upload endpoint. The video must first be hosted at a stable, direct, public HTTPS URL that remains available until the scheduled post publishes. A local `localhost` URL or a private Google Drive/Dropbox share link will not work. Cloudinary or a public Cloudflare R2 bucket can provide a suitable URL. The current integration accepts that URL in Script Studio; it does not upload the local video to a host automatically.
+The Buffer API is available on Buffer Free and paid plans. The current Free plan allows 1 API key, up to 150 requests per 15 minutes, 600 per 24 hours, and 1,000 per connected channel over 30 days (up to 3,000 total). Limits are shared by API keys and MCP connections and may change; see the [official rate limits](https://developers.buffer.com/guides/api-limits.html).
 
-The Buffer integration adds Reels to the Facebook and Instagram queues, and a YouTube video post with a separate title and description. YouTube is set to Public and Education category by default. The AI-generated disclosure option is enabled by default for platforms that support it. Review every post in Buffer before its scheduled time.
+**Video hosting requirement:** Buffer expects a video asset URL that is publicly accessible over HTTPS and remains available until the scheduled post publishes. A local `localhost` URL or a private Google Drive/Dropbox share link will not work. Cloudinary or a public Cloudflare R2 bucket can provide a suitable URL. The current integration accepts that URL in Script Studio; it does not upload the local video file to a host automatically. See Buffer's [media hosting guide](https://developers.buffer.com/guides/hosting-media.html).
+
+The Buffer integration adds Reels to the Facebook and Instagram queues, and a YouTube video post with a separate title and description. YouTube is set to Public and Education category by default. The AI-generated disclosure option is enabled by default for platforms that support it. Review every queued post in Buffer before its scheduled time.
 
 ### Configure Cloudflare free image generation
 
