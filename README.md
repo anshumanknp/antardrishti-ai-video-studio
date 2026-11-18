@@ -100,15 +100,40 @@ Each field can be edited and copied independently. Script regeneration or Devana
 4. Restart the Studio with `npm start`.
 5. Open Script Studio and select **Connect / Refresh Buffer**. The app reads your Buffer organizations and connected Facebook, Instagram and YouTube channels.
 6. Review the final video and all three platform-copy fields. In the main dashboard, change the job status to **Approved** only after that review.
-7. In Script Studio, select a channel, provide a direct public HTTPS URL for the finished video, and select **Add Video to Buffer Queue**.
+7. In Script Studio, select **Connect / Refresh Buffer**. The first Facebook, Instagram and YouTube channel (if connected) is selected by default. Adjust the checkboxes if needed.
+8. Generate the Social Media Content Pack. It contains separate Facebook and Instagram captions, a YouTube Shorts title and SEO description, hashtags, and 8–12 YouTube SEO keyword suggestions. Review the copy and approve the final video in the dashboard.
+9. Select **Queue to Selected Channels**. The Studio uploads the rendered video to Cloudinary automatically the first time, saves its permanent HTTPS URL to the job, and creates a separate Buffer queue post for each selected channel. No manual video URL or repeated upload is needed.
 
-The server rejects Buffer queue requests unless the job status is exactly **Approved**. Editing the script, platform copy, voice or scene images after approval returns an approved/exported job to **Needs review**. The Studio records successful Buffer queue posts against the job and blocks the same video URL from being queued twice to the same channel. One video can still be queued to different channels. A successful queue action means Buffer accepted the scheduled post; it does not mean the post has already published.
+### One-time Cloudinary setup for automatic video hosting
 
-The Buffer API is available on Buffer Free and paid plans. The current Free plan allows 1 API key, up to 150 requests per 15 minutes, 600 per 24 hours, and 1,000 per connected channel over 30 days (up to 3,000 total). Limits are shared by API keys and MCP connections and may change; see the [official rate limits](https://developers.buffer.com/guides/api-limits.html).
+Buffer's API does not accept a local MP4 upload. The Studio therefore uploads the rendered video to Cloudinary before creating Buffer posts.
 
-**Video hosting requirement:** Buffer expects a video asset URL that is publicly accessible over HTTPS and remains available until the scheduled post publishes. A local `localhost` URL or a private Google Drive/Dropbox share link will not work. Cloudinary or a public Cloudflare R2 bucket can provide a suitable URL. The current integration accepts that URL in Script Studio; it does not upload the local video file to a host automatically. See Buffer's [media hosting guide](https://developers.buffer.com/guides/hosting-media.html).
+1. Create or sign in to a Cloudinary account and open **Console Settings → Upload → Upload Presets**.
+2. Create an upload preset and set **Signing Mode** to **Unsigned**. Give it a name such as `antardrishti_buffer_video`.
+3. Restrict **Allowed formats** to `mp4,webm`, set an upload folder such as `antardrishti`, and keep uploaded videos publicly deliverable. An unsigned preset name can be used by anyone who knows it, so restrict formats and rotate the preset if it is exposed.
+4. Add an **eager video transformation** that produces MP4/H.264 from WebM. Configure it to run synchronously so the MP4 URL is included in the upload response. This matters when the browser can render only WebM.
+5. Add the Cloudinary **Cloud name** and unsigned **Upload preset name** to the local `.env` file:
 
-The Buffer integration adds Reels to the Facebook and Instagram queues, and a YouTube video post with a separate title and description. YouTube is set to Public and Education category by default. The AI-generated disclosure option is enabled by default for platforms that support it. Review every queued post in Buffer before its scheduled time.
+```env
+CLOUDINARY_CLOUD_NAME=your_cloud_name
+CLOUDINARY_UPLOAD_PRESET=antardrishti_buffer_video
+```
+
+6. Save `.env` and restart the Studio with `npm start`. Select **Connect / Refresh Buffer** again. The note should confirm that Cloudinary is ready.
+
+The cloud name and unsigned preset name are not API secrets, but the preset enables unauthenticated uploads. Do not use an unrestricted preset. Never put the Cloudinary API secret in browser code, chat or GitHub.
+
+The Studio keeps the Cloudinary URL with the job, so retries reuse the same hosted video. If the script, platform copy, voice or scene images change after approval, the job returns to review and the old hosted URL is cleared. Review and approve the new content before queueing again.
+
+The server only queues a job whose status is exactly **Approved**. The Studio creates separate posts per selected channel and records each success. It blocks duplicate posting of the same video to the same channel. If one channel fails, successful channels remain queued and the result lists the failures so only those can be retried. A successful queue action means Buffer accepted the scheduled post; it does not mean the post has already published.
+
+The Buffer API is available on Buffer Free and paid plans. Limits vary by plan and can change; see the [official rate limits](https://developers.buffer.com/guides/api-limits.html).
+
+**YouTube SEO limitation:** Buffer's YouTube API input accepts a title and description but does not expose YouTube's separate native video-tags field. Antardrishti generates and stores 8–12 relevant keyword suggestions and includes the main search phrases naturally in the title and description. It does not claim to send native YouTube tags through Buffer. Hashtags are included in the description. See the [Buffer YouTube metadata fields](https://developers.buffer.com/types/YoutubePostMetadataInput.html).
+
+Buffer requires public direct HTTPS media URLs that remain available until publication. Cloudinary supplies this hosted media URL. See Buffer's [media hosting guide](https://developers.buffer.com/guides/hosting-media.html).
+
+The Buffer integration queues Reels to Facebook and Instagram and a YouTube video post with a separate title and description. YouTube is set to Public and Education category by default. The AI-generated disclosure option is enabled by default where supported. Review all scheduled posts in Buffer before their queue time.
 
 ### Configure Cloudflare free image generation
 

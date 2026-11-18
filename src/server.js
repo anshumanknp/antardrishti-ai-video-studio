@@ -493,7 +493,7 @@ app.post("/api/jobs/:id/generate-social-copy", async (req, res) => {
         "FACEBOOK: write a warm, readable caption with a strong first line, 2 short paragraphs, a clear CTA and 3 to 5 lowercase English hashtags. Aim for 50 to 90 words.",
         "INSTAGRAM: write a distinct Reel caption, not a copy of Facebook. Put a strong hook in the first line, keep it concise, include a natural CTA and 5 to 8 lowercase English hashtags. Use emojis sparingly.",
         "YOUTUBE SHORTS: write a clear Hindi title of no more than 80 characters (never exceed 100). Put the main search phrase naturally in the title and first two description lines. Write a separate description of 2 to 4 short lines with a CTA and 3 to 5 lowercase English hashtags.",
-        "YOUTUBE SEO TAGS: create 8 to 12 precise English lowercase search keyword phrases, comma-separated, no # symbols, no duplicates, no broad unrelated words, under 500 characters total. They must match the video's actual topic. Buffer's API does not expose YouTube's native tags field, so also weave the primary search phrase naturally into the title and description without keyword stuffing.",
+        "YOUTUBE SEO TAGS: create 8 to 12 precise English lowercase search keyword phrases, comma-separated, no # symbols, no duplicates, no broad unrelated words, under 500 characters total. They must match the video's actual topic. Buffer's API does not expose YouTube's native tags field, so weave the most important 2 to 4 phrases naturally into the title and first two description lines. Do not append a keyword dump to the description.",
         "Do not include platform labels, quotation marks around the copy, markdown code fences or explanations.",
         "Return only valid JSON matching this schema: " + JSON.stringify(schema),
         "VIDEO TOPIC: " + job.topic,
@@ -587,7 +587,7 @@ app.post("/api/jobs/:id/buffer/queue", async (req, res) => {
     });
     if (platformCopy && typeof platformCopy === "object") {
       const savedCopy = {};
-      for (const field of ["facebookCaption", "instagramCaption", "youtubeTitle", "youtubeDescription"]) {
+      for (const field of ["facebookCaption", "instagramCaption", "youtubeTitle", "youtubeDescription", "youtubeTags"]) {
         if (typeof platformCopy[field] === "string") {
           savedCopy[field] = platformCopy[field].trim().slice(0, field === "youtubeTitle" ? 100 : 5000);
         }
