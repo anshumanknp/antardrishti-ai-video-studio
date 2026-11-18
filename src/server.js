@@ -687,6 +687,9 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
 
   const expectedSceneCount = getRecommendedSceneCount(job.duration);
   const targetWordRanges = { 15: "28–36", 30: "56–68", 45: "84–100", 60: "112–132" };
+  const targetWordRange = targetWordRanges[job.duration] ||
+    (Math.round(Number(job.duration) * 1.8) + "–" + Math.round(Number(job.duration) * 2.1));
+  const subtitleSegmentRange = Number(job.duration) <= 15 ? "2 or 3" : "3 or 4";
   const schema = {
     type: "object",
     properties: {
@@ -708,7 +711,7 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
             subtitle: { type: "string", description: "A short central idea subtitle in Devanagari Hindi." },
             subtitle_segments: {
               type: "array",
-              description: "Three or four short Devanagari Hindi captions, in spoken order, each ideally 3 to 7 words. Together they should cover the scene dialogue, not add new claims.",
+              description: subtitleSegmentRange + " short Devanagari Hindi captions, in spoken order, each ideally 3 to 7 words. Together they should cover the scene dialogue, not add new claims.",
               items: { type: "string" }
             }
           },
@@ -736,10 +739,10 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
     "- The title, hook, voiceover, scene dialogue, subtitles and CTA must be in natural Hindi using Devanagari. Keep English words to at most about 10% and use them only when natural.",
     "- Correct style example: \"क्या आप जानते हैं कि आपका मन आपके अनुभवों को कैसे प्रभावित करता है?\" Incorrect style: \"Kya aap jaante hain ki aapka man...\"",
     "- Warm, grounded Indian Hindi voice. Use everyday language, not stiff translated Hindi.",
-    "- Make the voiceover fit the selected duration. Aim for approximately " + targetWordRanges[job.duration] + " spoken Hindi words, including hook and CTA, at a calm Indian Hindi narration pace. Do not pad with repetition.",
+    "- Make the voiceover fit the selected duration. Aim for approximately " + targetWordRange + " spoken Hindi words, including hook and CTA, at a calm Indian Hindi narration pace. Do not pad with repetition.",
     "- Write a strong hook for the first 2–3 seconds.",
     "- Provide exactly " + expectedSceneCount + " scenes. Divide the selected duration across scenes in whole seconds, with durations adding up to exactly " + job.duration + " seconds. Use 3 scenes for 15/30 seconds, 5 for 45 seconds and 6 for 60 seconds.",
-    "- Each scene needs dialogue in Devanagari Hindi, a short central subtitle, 3 or 4 sequential subtitle_segments and a visual direction specific to that dialogue.",
+    "- Each scene needs dialogue in Devanagari Hindi, a short central subtitle, " + subtitleSegmentRange + " sequential subtitle_segments and a visual direction specific to that dialogue.",
     "- Specify shot_type, camera_movement, transition and audio_cue for every scene. These must be executable instructions, not labels only.",
     "- Each subtitle segment should be a natural spoken phrase of about 3–7 words. Keep the segments in the same order as the dialogue so they can appear one after another during that scene.",
     "- Do not put Scene 1, Scene 2, Scene 3, scene numbers, headings or labels in dialogue or subtitles.",
@@ -948,6 +951,7 @@ app.post("/api/jobs/:id/generate-scene-images", async (req, res) => {
 app.post("/api/jobs/:id/convert-to-devanagari", async (req, res) => {
   const { jobs, job } = findJob(req.params.id);
   if (!job) return res.status(404).json({ error: "Video brief not found." });
+  const subtitleSegmentRange = Number(job.duration) <= 15 ? "2 or 3" : "3 or 4";
 
   const original = job.scriptData || {
     title: job.topic,
@@ -1006,7 +1010,7 @@ app.post("/api/jobs/:id/convert-to-devanagari", async (req, res) => {
         "Keep visual_direction exactly as supplied; it is an internal prompt and may remain in English.",
         "Preserve each scene's existing shot_type, camera_movement, transition and audio_cue exactly where present. These are internal production notes and should remain concise English where originally written.",
         "If any production note is missing in an older script, fill only that missing note with a simple practical choice based on visual_direction; do not change notes that already exist.",
-        "Keep scene order, scene count and each duration_sec unchanged. Return 3 or 4 non-empty subtitle_segments for every scene.",
+        "Keep scene order, scene count and each duration_sec unchanged. Return " + subtitleSegmentRange + " non-empty subtitle_segments for every scene.",
         "Return only valid JSON matching this schema: " + JSON.stringify(schema),
         "EXISTING SCRIPT:",
         JSON.stringify(original)
