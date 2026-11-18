@@ -1635,13 +1635,17 @@
           let startScale = 1.015;
           let endScale = 1.06;
           if (/push.?in|zoom.?in|dolly.?in/.test(movement)) {
-            startScale = 1.0;
+            startScale = 1.04;
             endScale = 1.12;
           } else if (/pull.?out|zoom.?out|dolly.?out/.test(movement)) {
             startScale = 1.12;
-            endScale = 1.0;
+            endScale = 1.04;
+          } else {
+            startScale = 1.04;
+            endScale = 1.07;
           }
-          const framingScale = /close.?up|detail/.test(framing) ? 1.1 : /wide/.test(framing) ? 1.0 : 1.03;
+          const movementScale = /tilt/.test(movement) ? 1.06 : 1.0;
+          const framingScale = (/close.?up|detail/.test(framing) ? 1.1 : /wide/.test(framing) ? 1.02 : 1.04) * movementScale;
           const motionScale = framingScale * (startScale + (endScale - startScale) * progress);
           const imageWidth = image.width * baseScale * motionScale;
           const imageHeight = image.height * baseScale * motionScale;
@@ -1649,8 +1653,8 @@
           let driftY = (0.5 - progress) * 14;
           if (/pan left|move left|tracking left/.test(movement)) driftX += progress * 82;
           else if (/pan right|move right|tracking right/.test(movement)) driftX -= progress * 82;
-          if (/tilt up|move up/.test(movement)) driftY += progress * 70;
-          else if (/tilt down|move down/.test(movement)) driftY -= progress * 70;
+          if (/tilt up|move up/.test(movement)) driftY += progress * 36;
+          else if (/tilt down|move down/.test(movement)) driftY -= progress * 36;
           context.drawImage(
             image,
             (w - imageWidth) / 2 + driftX,
