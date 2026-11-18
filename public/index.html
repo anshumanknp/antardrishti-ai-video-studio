@@ -1000,7 +1000,8 @@
       const targetVoiceDuration = Number(activeJob.duration || 45);
       const voiceTolerance = Math.max(2, targetVoiceDuration * 0.08);
       if (!Number.isFinite(Number(voiceResult.audioDurationSec)) ||
-          Math.abs(Number(voiceResult.audioDurationSec) - targetVoiceDuration) > voiceTolerance) {
+          Number(voiceResult.audioDurationSec) < targetVoiceDuration - voiceTolerance ||
+          Number(voiceResult.audioDurationSec) > targetVoiceDuration + 0.05) {
         throw new Error(
           "Voiceover " + Number(voiceResult.audioDurationSec || 0).toFixed(1) +
           " sec की बनी है, जबकि selected video " + targetVoiceDuration +
@@ -1538,7 +1539,9 @@
       }
 
       const voiceTolerance = Math.max(2, targetDuration * 0.08);
-      if (audioBuffer && Math.abs(audioBuffer.duration - targetDuration) > voiceTolerance) {
+      if (audioBuffer &&
+          (audioBuffer.duration < targetDuration - voiceTolerance ||
+           audioBuffer.duration > targetDuration + 0.05)) {
         throw new Error(
           "Generated voice " + audioBuffer.duration.toFixed(1) + " sec की है, जबकि video " +
           targetDuration + " sec का चुना गया है। Voiceover edit करके Generate Hindi Voice दोबारा करें।"
