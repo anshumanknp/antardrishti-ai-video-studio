@@ -5,6 +5,7 @@ import fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import { readJobs as readJobStore, writeJobs as writeJobStore } from "./job-store.js";
 import { preserveSceneProductionFields, validateScriptData } from "./script-validation.js";
+import { buildBufferVideoPostInput } from "./buffer-api.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -42,6 +43,7 @@ const CLOUDFLARE_IMAGE_DAILY_LIMIT = 100;
 const IMAGE_USAGE_FILE = path.join(DATA_DIR, "cloudflare-image-usage.json");
 const CLOUDFLARE_IMAGE_ENABLED = process.env.CLOUDFLARE_IMAGE_ENABLED === "true" &&
   Boolean(CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN);
+const BUFFER_API_KEY = process.env.BUFFER_API_KEY || "";
 const FEMALE_TTS_VOICES = new Set(["Kore", "Aoede", "Leda", "Zephyr", "Gacrux"]);
 const MALE_TTS_VOICES = new Set(["Orus", "Puck", "Charon", "Algieba", "Sadaltager"]);
 const DEFAULT_FEMALE_VOICE = "Kore";
@@ -360,6 +362,201 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
+
+async function callBufferApi(query, variables = {}) {
+  if (!BUFFER_API_KEY) {
+    const error = new Error("Buffer API key configured नहीं है। local .env में BUFFER_API_KEY जोड़ें और server restart करें।");
+    error.status = 503;
+    throw error;
+  }
+
+  const response = await fetch("https://api.buffer.com", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: "Bearer " + BUFFER_API_KEY
+    },
+    body: JSON.stringify({ query, variables })
+  });
+
+  let payload;
+  try { payload = await response.json(); }
+  catch { throw new Error("Buffer API ने readable response नहीं दिया।"); }
+
+  if (!response.ok) {
+    const error = new Error("Buffer API request failed (HTTP " + response.status + ").");
+    error.status = response.status === 401 || response.status === 403 ? 502 : 503;
+    throw error;
+  }
+  if (Array.isArray(payload.errors) && payload.errors.length) {
+    throw new Error(String(payload.errors[0]?.message || "Buffer API request failed.").slice(0, 500));
+  }
+  return payload.data || {};
+}
+
+async function fetchBufferOrganizationsAndChannels() {
+  const accountData = await callBufferApi(
+    "query BufferAccount { account { id organizations { id name } } }"
+  );
+  const account = accountData.account;
+  if (!account) throw new Error("Buffer account response में account नहीं मिला।");
+
+  const organizations = Array.isArray(account.organizations) ? account.organizations : [];
+  const results = await Promise.all(organizations.map(async organization => {
+    const query = "query BufferChannels { channels(input: { organizationId: " +
+      JSON.stringify(organization.id) + " }) { id name service } }";
+    const data = await callBufferApi(query);
+    return {
+      id: organization.id,
+      name: organization.name,
+      channels: Array.isArray(data.channels) ? data.channels : []
+    };
+  }));
+
+  return { account: { id: account.id }, organizations: results };
+}
+
+app.get("/api/buffer/status", async (_req, res) => {
+  if (!BUFFER_API_KEY) {
+    return res.json({
+      configured: false,
+      connected: false,
+      message: "BUFFER_API_KEY local .env में जोड़ें।"
+    });
+  }
+  try {
+    const data = await fetchBufferOrganizationsAndChannels();
+    res.json({ configured: true, connected: true, ...data });
+  } catch (error) {
+    res.status(error.status || 502).json({
+      configured: true,
+      connected: false,
+      error: error.message || "Buffer से connect नहीं हो पाया।"
+    });
+  }
+});
+
+app.post("/api/jobs/:id/generate-social-copy", async (req, res) => {
+  const { jobs, job } = findJob(req.params.id);
+  if (!job) return res.status(404).json({ error: "Video brief not found." });
+  const script = job.scriptData;
+  if (!script || !String(script.voiceover || "").trim()) {
+    return res.status(400).json({ error: "पहले Hindi video script generate करें।" });
+  }
+
+  const schema = {
+    type: "object",
+    properties: {
+      facebookCaption: { type: "string" },
+      instagramCaption: { type: "string" },
+      youtubeTitle: { type: "string" },
+      youtubeDescription: { type: "string" }
+    },
+    required: ["facebookCaption", "instagramCaption", "youtubeTitle", "youtubeDescription"]
+  };
+
+  try {
+    const payload = await callGemini({
+      model: GEMINI_TEXT_MODEL,
+      input: [
+        "Create platform-specific publishing copy for one Antardrishti Hindi self-awareness short video.",
+        "Use the video script below as the only source. Preserve its meaning. Do not invent statistics, medical claims, diagnoses, cures or promises.",
+        "Write natural Hindi in Devanagari, with roughly 90% Hindi and at most 10% natural English.",
+        "All hashtags must be English lowercase words. Add a small relevant set; do not stuff hashtags.",
+        "FACEBOOK: write a warm, readable caption with a strong first line, 2 short paragraphs, a clear CTA and 3 to 5 lowercase English hashtags. Aim for 50 to 90 words.",
+        "INSTAGRAM: write a distinct Reel caption, not a copy of Facebook. Put a strong hook in the first line, keep it concise, include a natural CTA and 5 to 8 lowercase English hashtags. Use emojis sparingly.",
+        "YOUTUBE SHORTS: write a clear Hindi title of no more than 80 characters (never exceed 100), and a separate description of 2 to 4 short lines with a CTA and 3 to 5 lowercase English hashtags.",
+        "Do not include platform labels, quotation marks around the copy, markdown code fences or explanations.",
+        "Return only valid JSON matching this schema: " + JSON.stringify(schema),
+        "VIDEO TOPIC: " + job.topic,
+        "VIDEO TITLE: " + (script.title || ""),
+        "OPENING HOOK: " + (script.hook || ""),
+        "VOICEOVER: " + script.voiceover,
+        "CALL TO ACTION: " + (script.cta || "")
+      ].join("\n"),
+      response_format: { type: "text", mime_type: "application/json", schema },
+      generation_config: { max_output_tokens: 1400 }
+    });
+
+    let copy;
+    try { copy = JSON.parse(getModelText(payload)); }
+    catch { return res.status(502).json({ error: "Social Media Pack का response सही JSON नहीं था। फिर कोशिश करें।" }); }
+
+    for (const field of schema.required) {
+      if (typeof copy[field] !== "string" || !copy[field].trim()) {
+        return res.status(502).json({ error: "Social Media Pack में " + field + " खाली है। फिर कोशिश करें।" });
+      }
+      copy[field] = copy[field].trim();
+    }
+    if (copy.youtubeTitle.length > 100) {
+      return res.status(422).json({ error: "YouTube title 100 characters से लंबा आया। Social Media Pack फिर generate करें।" });
+    }
+
+    job.platformCopy = copy;
+    job.updatedAt = new Date().toISOString();
+    writeJobs(jobs);
+    res.json({ ok: true, platformCopy: copy, job });
+  } catch (error) {
+    res.status(error.status || 502).json({
+      error: error.message || "Social Media Pack generate नहीं हो पाया।"
+    });
+  }
+});
+
+app.post("/api/jobs/:id/buffer/queue", async (req, res) => {
+  const { jobs, job } = findJob(req.params.id);
+  if (!job) return res.status(404).json({ error: "Video brief not found." });
+  if (!BUFFER_API_KEY) {
+    return res.status(503).json({ error: "पहले local .env में BUFFER_API_KEY जोड़ें और server restart करें।" });
+  }
+
+  const channelId = String(req.body?.channelId || "").trim();
+  const videoUrl = String(req.body?.videoUrl || "").trim();
+  if (!channelId) return res.status(400).json({ error: "Buffer channel चुनें।" });
+
+  try {
+    const bufferData = await fetchBufferOrganizationsAndChannels();
+    const channel = bufferData.organizations
+      .flatMap(organization => organization.channels)
+      .find(item => item.id === channelId);
+    if (!channel) return res.status(400).json({ error: "Selected Buffer channel आपके connected account में नहीं मिला।" });
+
+    const platformCopy = req.body?.platformCopy && typeof req.body.platformCopy === "object"
+      ? req.body.platformCopy
+      : job.platformCopy;
+    const input = buildBufferVideoPostInput({
+      channel,
+      videoUrl,
+      platformCopy,
+      isAiGenerated: req.body?.isAiGenerated !== false
+    });
+
+    const mutation = `mutation CreatePost($input: CreatePostInput!) {
+      createPost(input: $input) {
+        ... on PostActionSuccess {
+          post { id text dueAt status channelId }
+        }
+        ... on MutationError { message }
+      }
+    }`;
+    const result = await callBufferApi(mutation, { input });
+    const action = result.createPost;
+    if (action?.message) throw new Error(action.message);
+    if (!action?.post?.id) throw new Error("Buffer ने post ID वापस नहीं किया।");
+    res.json({
+      ok: true,
+      queued: true,
+      platform: channel.service,
+      channelName: channel.name,
+      post: action.post
+    });
+  } catch (error) {
+    res.status(error.status || 502).json({
+      error: error.message || "Buffer Queue में post नहीं जा पाया।"
+    });
+  }
+});
+
 app.get("/api/brand/logo", (_req, res) => {
   try {
     const brand = JSON.parse(fs.readFileSync(BRAND_LOGO_META_FILE, "utf8"));
@@ -621,6 +818,7 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
     job.scriptData = scriptData;
     job.script = scriptData.voiceover;
     job.voiceFile = "";
+    job.platformCopy = null;
     job.status = "script_ready";
     job.updatedAt = new Date().toISOString();
     writeJobs(jobs);
@@ -804,6 +1002,7 @@ app.post("/api/jobs/:id/convert-to-devanagari", async (req, res) => {
     job.scriptData = corrected;
     job.script = corrected.voiceover;
     job.voiceFile = "";
+    job.platformCopy = null;
     if (job.status === "approved" || job.status === "exported" || job.status === "published") {
       job.status = "review";
     } else {
@@ -989,6 +1188,14 @@ app.patch("/api/jobs/:id", (req, res) => {
 
   for (const [key, value] of Object.entries(req.body || {})) {
     if (allowedStrings.has(key) && typeof value === "string") job[key] = value.slice(0, 30000);
+  }
+  if (req.body?.platformCopy && typeof req.body.platformCopy === "object" && !Array.isArray(req.body.platformCopy)) {
+    const copy = {};
+    for (const key of ["facebookCaption", "instagramCaption", "youtubeTitle", "youtubeDescription"]) {
+      const value = req.body.platformCopy[key];
+      if (typeof value === "string") copy[key] = value.slice(0, key === "youtubeTitle" ? 100 : 5000);
+    }
+    job.platformCopy = copy;
   }
   if (["female", "male", "duet", "mix"].includes(req.body?.voiceMode)) job.voiceMode = req.body.voiceMode;
   if (FEMALE_TTS_VOICES.has(req.body?.femaleVoice)) job.femaleVoice = req.body.femaleVoice;
