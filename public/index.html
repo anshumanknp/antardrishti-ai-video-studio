@@ -163,6 +163,23 @@
     .video-result video { width:min(260px,100%); display:block; margin:0 auto 10px; background:#000; border-radius:8px; }
     @media (max-width: 700px) { .scene-image-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
     .video-result a { display:block; text-align:center; color:#e6c78e; font-size:12px; text-decoration:underline; }
+    .social-pack, .buffer-publish-panel { margin-top:18px; padding:15px; border:1px solid var(--line); border-radius:10px; background:#121d2d; }
+    .social-pack-head, .buffer-panel-head { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:10px; }
+    .social-pack-head h2, .buffer-panel-head h2 { margin:0; font-family:Georgia, "Times New Roman", serif; font-size:18px; font-weight:500; }
+    .social-copy-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:12px; }
+    .social-copy-card { min-width:0; padding:12px; background:#19273a; border:1px solid #30435d; border-radius:9px; }
+    .social-copy-card h3 { margin:0 0 8px; color:#e6c78e; font-size:12px; }
+    .social-copy-card textarea { width:100%; min-height:145px; resize:vertical; padding:10px; color:var(--text); background:#0f1928; border:1px solid #34465e; border-radius:7px; font:11px/1.55 inherit; }
+    .social-copy-card .title-input { margin-bottom:8px; }
+    .social-copy-actions { display:flex; flex-wrap:wrap; gap:7px; margin-top:8px; }
+    .social-copy-note, .buffer-help { margin:7px 0; color:#9eafc4; font-size:10px; line-height:1.55; }
+    .buffer-grid { display:grid; grid-template-columns:1fr 1fr; gap:11px; align-items:end; margin-top:12px; }
+    .buffer-grid .wide { grid-column:1/-1; }
+    .buffer-status-pill { color:#a9b9cb; border:1px solid #40536c; border-radius:20px; padding:5px 9px; font-size:10px; }
+    .buffer-status-pill.connected { color:var(--green); border-color:#376b57; }
+    .buffer-result { min-height:18px; margin:9px 0 0; color:var(--green); font-size:11px; }
+    .buffer-result.error { color:var(--red); }
+    .buffer-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
     .privacy-note { color:#8091a7; font-size:10px; line-height:1.55; margin-top:8px; }
     .empty { padding: 35px 20px; text-align: center; color: var(--muted); font-size: 12px; }
     .footer-note { margin: 15px 2px 0; color: #75869b; font-size: 10px; line-height: 1.7; }
@@ -197,6 +214,8 @@
       .queue-tools input { flex: 1; width: 1px; }
       .queue-tools select { width: 135px; }
       .modal-grid, .script-scenes { grid-template-columns:1fr; }
+      .social-copy-grid, .buffer-grid { grid-template-columns:1fr; }
+      .buffer-grid .wide { grid-column:auto; }
       .modal-body { padding:15px; }
     }
     @media (max-width: 420px) {
@@ -463,6 +482,75 @@
           <button class="secondary-btn" id="renderVideoBtn" type="button">Create Slide Video</button>
           <button class="primary-btn" id="autoCreateVideoBtn" type="button" disabled>Auto Create Video (Free APIs)</button>
         </div>
+        <section class="social-pack" aria-labelledby="socialPackTitle">
+          <div class="social-pack-head">
+            <h2 id="socialPackTitle">Social Media Content Pack</h2>
+            <button class="secondary-btn" id="generateSocialCopyBtn" type="button" disabled>Generate Captions & Titles</button>
+          </div>
+          <p class="social-copy-note">एक ही video script से platform के हिसाब से अलग copy बनेगी। Text edit करके Save करें या Copy करें। Hashtags English lowercase में रहेंगे।</p>
+          <div class="social-copy-grid">
+            <article class="social-copy-card">
+              <h3>Facebook · Caption</h3>
+              <textarea id="facebookCaption" maxlength="5000" placeholder="Facebook caption यहाँ बनेगा…"></textarea>
+              <div class="social-copy-actions">
+                <button class="secondary-btn" type="button" id="copyFacebookCaptionBtn">Copy Facebook</button>
+              </div>
+            </article>
+            <article class="social-copy-card">
+              <h3>Instagram · Reel Caption</h3>
+              <textarea id="instagramCaption" maxlength="5000" placeholder="Instagram Reel caption यहाँ बनेगा…"></textarea>
+              <div class="social-copy-actions">
+                <button class="secondary-btn" type="button" id="copyInstagramCaptionBtn">Copy Instagram</button>
+              </div>
+            </article>
+            <article class="social-copy-card">
+              <h3>YouTube Shorts</h3>
+              <label for="youtubeTitle">VIDEO TITLE · MAX 100 CHARACTERS</label>
+              <input class="title-input" id="youtubeTitle" maxlength="100" placeholder="YouTube title…">
+              <label for="youtubeDescription">DESCRIPTION</label>
+              <textarea id="youtubeDescription" maxlength="5000" placeholder="YouTube description और hashtags…"></textarea>
+              <div class="social-copy-actions">
+                <button class="secondary-btn" type="button" id="copyYoutubeTitleBtn">Copy Title</button>
+                <button class="secondary-btn" type="button" id="copyYoutubeDescriptionBtn">Copy Description</button>
+              </div>
+            </article>
+          </div>
+          <div class="modal-actions">
+            <button class="secondary-btn" id="saveSocialCopyBtn" type="button">Save Social Copy</button>
+            <span class="panel-kicker" id="socialCopyNote">Social copy अभी generate नहीं हुई है।</span>
+          </div>
+        </section>
+
+        <section class="buffer-publish-panel" aria-labelledby="bufferPublishTitle">
+          <div class="buffer-panel-head">
+            <h2 id="bufferPublishTitle">Buffer Publishing</h2>
+            <span class="buffer-status-pill" id="bufferConnectionStatus">Not connected</span>
+          </div>
+          <p class="buffer-help">यहाँ से चुने हुए Facebook Reel, Instagram Reel या YouTube channel की Buffer Queue में video post भेजें। इसके लिए Buffer API key और public HTTPS video URL चाहिए।</p>
+          <div class="buffer-grid">
+            <div>
+              <label for="bufferChannelSelect">BUFFER CHANNEL</label>
+              <select id="bufferChannelSelect" disabled>
+                <option value="">Connect Buffer first…</option>
+              </select>
+            </div>
+            <div>
+              <label for="bufferVideoUrl">PUBLIC VIDEO URL · HTTPS</label>
+              <input id="bufferVideoUrl" type="url" placeholder="https://your-public-host/video.mp4">
+            </div>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-weight:500">
+            <input id="bufferAiDisclosure" type="checkbox" checked style="width:auto;min-height:0">
+            Mark this post as AI-generated where the channel supports disclosure
+          </label>
+          <div class="buffer-actions">
+            <button class="secondary-btn" id="refreshBufferChannelsBtn" type="button">Connect / Refresh Buffer</button>
+            <button class="primary-btn" id="sendToBufferBtn" type="button" disabled>Add Video to Buffer Queue</button>
+          </div>
+          <p class="buffer-help" id="bufferSetupNote">Buffer API key को project की local .env file में BUFFER_API_KEY= के बाद रखें। API key chat या GitHub में share न करें।</p>
+          <p class="buffer-result" id="bufferResult" role="status"></p>
+        </section>
+
         <p class="modal-status" id="studioStatus" role="status"></p>
         <audio id="voicePlayer" class="voice-player" controls hidden></audio>
         <div class="video-result" id="videoResult">
