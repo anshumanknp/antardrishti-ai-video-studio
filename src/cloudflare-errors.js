@@ -27,9 +27,13 @@ export function classifyCloudflareImageError({
 
   let message;
   if (isDailyQuota) {
-    message = "Cloudflare Workers AI की 10,000 Neurons वाली daily free allocation पूरी हो गई है। Cloudflare Dashboard में usage जाँचें; allocation उपलब्ध होने पर ही image generation फिर चलाएँ। कोई paid fallback नहीं होगा।";
+    message = "Cloudflare Workers AI की 10,000 Neurons वाली daily free allocation पूरी हो गई है" +
+      (code ? " (Cloudflare error " + code + ")" : "") +
+      "। Cloudflare Dashboard में usage जाँचें; allocation उपलब्ध होने पर ही image generation फिर चलाएँ। कोई paid fallback नहीं होगा।";
   } else if (isCapacity) {
-    message = "Cloudflare Workers AI में इस समय model capacity उपलब्ध नहीं है (temporary 3040)। थोड़ी देर बाद केवल एक बार फिर कोशिश करें। बार-बार retry न करें।";
+    message = "Cloudflare Workers AI में इस समय model capacity उपलब्ध नहीं है" +
+      (code ? " (Cloudflare error " + code + ")" : " (temporary capacity error)") +
+      "। थोड़ी देर बाद केवल एक बार फिर कोशिश करें। बार-बार retry न करें.";
   } else if (Number(httpStatus) === 429) {
     message = providerMessage
       ? "Cloudflare ने request पर rate limit लगाई (HTTP 429): " + providerMessage
@@ -44,6 +48,10 @@ export function classifyCloudflareImageError({
   const retryAfterSeconds = Number.isFinite(parsedRetryAfter) && parsedRetryAfter >= 0
     ? parsedRetryAfter
     : null;
+
+  if (retryAfterSeconds !== null && isCapacity) {
+    message += " Retry-After: " + retryAfterSeconds + " seconds.";
+  }
 
   return {
     status: Number(httpStatus) === 429 ? 429 : Number(httpStatus) >= 500 ? 502 : Number(httpStatus || 502),
