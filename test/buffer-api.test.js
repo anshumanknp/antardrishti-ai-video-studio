@@ -57,6 +57,14 @@ test("rejects local or non-HTTPS media URLs", () => {
   }), /public HTTPS URL/i);
 });
 
+test("rejects private-network HTTPS video URLs", () => {
+  assert.throws(() => buildBufferVideoPostInput({
+    channel: { id: "fb-1", service: "facebook" },
+    videoUrl: "https://192.168.1.20/video.mp4",
+    platformCopy: copy
+  }), /Private or local video URLs/i);
+});
+
 test("rejects channels outside the supported three platforms", () => {
   assert.throws(() => buildBufferVideoPostInput({
     channel: { id: "x-1", service: "twitter" },
