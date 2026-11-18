@@ -6,7 +6,7 @@ function fingerprintVideoUrl(videoUrl) {
   return createHash("sha256").update(String(videoUrl || "").trim()).digest("hex");
 }
 
-export function resetBufferApprovalIfContentChanged(job) {
+export function resetBufferApprovalIfContentChanged(job, { invalidateRenderedVideo = false } = {}) {
   if (!job || typeof job !== "object") return false;
   let changed = false;
   if (job.status === "approved" || job.status === "exported") {
@@ -16,6 +16,13 @@ export function resetBufferApprovalIfContentChanged(job) {
   // A hosted video belongs to one exact render. Content changes require a fresh upload.
   if (job.bufferVideoUrl) {
     delete job.bufferVideoUrl;
+    changed = true;
+  }
+  if (invalidateRenderedVideo && job.renderedVideoFile) {
+    delete job.renderedVideoFile;
+    delete job.renderedVideoMimeType;
+    delete job.renderedVideoSizeBytes;
+    delete job.renderedVideoSavedAt;
     changed = true;
   }
   return changed;

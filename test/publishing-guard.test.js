@@ -101,3 +101,23 @@ test("content changes clear the hosted media URL so a new render must be uploade
   assert.equal(job.status, "review");
   assert.equal("bufferVideoUrl" in job, false);
 });
+
+
+test("video-source edits invalidate saved local render and hosted media", () => {
+  const job = { status:"approved", bufferVideoUrl:"https://cdn.example.com/old.mp4",
+    renderedVideoFile:"antardrishti-job-1-final.mp4", renderedVideoMimeType:"video/mp4",
+    renderedVideoSizeBytes:12345, renderedVideoSavedAt:"2026-11-18T10:00:00.000Z" };
+  assert.equal(resetBufferApprovalIfContentChanged(job,{invalidateRenderedVideo:true}),true);
+  assert.equal(job.status,"review");
+  assert.equal("bufferVideoUrl" in job,false);
+  assert.equal("renderedVideoFile" in job,false);
+  assert.equal("renderedVideoMimeType" in job,false);
+  assert.equal("renderedVideoSizeBytes" in job,false);
+  assert.equal("renderedVideoSavedAt" in job,false);
+});
+test("social-copy edits can reset approval without deleting an unchanged render", () => {
+  const job={status:"approved",renderedVideoFile:"antardrishti-job-1-final.mp4",renderedVideoMimeType:"video/mp4"};
+  assert.equal(resetBufferApprovalIfContentChanged(job),true);
+  assert.equal(job.status,"review");
+  assert.equal(job.renderedVideoFile,"antardrishti-job-1-final.mp4");
+});

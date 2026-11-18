@@ -699,6 +699,7 @@
   let currentVideoUrl = null;
   let currentVideoBlob = null;
   let currentVideoJobId = null;
+  let currentVideoSavedLocally = false;
   let currentVideoExtension = "mp4";
   let currentVideoNeedsUpload = false;
   let currentSubtitleUrl = null;
@@ -1534,6 +1535,14 @@
   function displayScript(job) {
     activeJob = job;
     activeScriptData = job.scriptData || null;
+    if (!job.renderedVideoFile && currentVideoJobId === job.id && currentVideoSavedLocally) {
+      if (currentVideoUrl) URL.revokeObjectURL(currentVideoUrl);
+      currentVideoUrl = null;
+      currentVideoBlob = null;
+      currentVideoSavedLocally = false;
+      currentVideoNeedsUpload = false;
+      document.getElementById("videoResult").style.display = "none";
+    }
     document.getElementById("scriptTopicLabel").textContent = job.topic + " · " + job.duration + " sec · " + (activeScriptData?.scenes?.length || 0) + " scenes";
     document.getElementById("scriptTitle").value = activeScriptData?.title || "";
     document.getElementById("scriptHook").value = activeScriptData?.hook || "";
@@ -1560,11 +1569,40 @@
     document.getElementById("autoCreateVideoBtn").disabled = !imageGenerationEnabled || !activeScriptData;
   }
 
+  async function restoreSavedRenderedVideo(job) {
+    if (!job?.renderedVideoFile) return false;
+    if (currentVideoBlob && currentVideoJobId === job.id && currentVideoSavedLocally) return true;
+    const response = await fetch("/outputs/" + encodeURIComponent(job.renderedVideoFile), { cache: "no-store" });
+    if (!response.ok) throw new Error("Project outputs folder से saved video वापस नहीं पढ़ पाई।");
+    const blob = await response.blob();
+    if (blob.size < 1000) throw new Error("Saved rendered video file खाली या खराब है।");
+    if (currentVideoUrl) URL.revokeObjectURL(currentVideoUrl);
+    currentVideoBlob = blob;
+    currentVideoJobId = job.id;
+    currentVideoSavedLocally = true;
+    currentVideoExtension = String(job.renderedVideoFile).toLowerCase().endsWith(".webm") ? "webm" : "mp4";
+    currentVideoNeedsUpload = !job.bufferVideoUrl;
+    currentVideoUrl = URL.createObjectURL(blob);
+    const preview = document.getElementById("videoPreview");
+    preview.src = currentVideoUrl;
+    preview.load();
+    const download = document.getElementById("videoDownload");
+    download.href = currentVideoUrl;
+    download.download = "antardrishti-" + job.id.slice(0, 8) + "." + currentVideoExtension;
+    download.textContent = "Download " + currentVideoExtension.toUpperCase() + " video (" + Math.round(blob.size / 1024 / 1024 * 10) / 10 + " MB)";
+    document.getElementById("videoResult").style.display = "block";
+    refreshBufferPublishControls();
+    return true;
+  }
+
   async function openScriptStudio(jobId) {
     activeJobId = jobId;
     activeJob = jobs.find(job => job.id === jobId) || null;
     if (currentVideoJobId !== jobId) {
+      if (currentVideoUrl) URL.revokeObjectURL(currentVideoUrl);
+      currentVideoUrl = null;
       currentVideoBlob = null;
+      currentVideoSavedLocally = false;
       currentVideoNeedsUpload = false;
       currentVideoJobId = jobId;
     }
@@ -1573,8 +1611,16 @@
     setStudioStatus("Video brief खुल रहा है…");
     displayScript(activeJob);
     if (!scriptDialog.open) scriptDialog.showModal();
+    if (activeJob.renderedVideoFile) {
+      try {
+        await restoreSavedRenderedVideo(activeJob);
+        setStudioStatus("Saved final video वापस आ गई। यह project outputs folder में सुरक्षित है।");
+      } catch (error) {
+        setStudioStatus(error.message || "Saved video restore नहीं हो पाई।", true);
+      }
+    }
     if (!activeJob.scriptData) await generateScript(true);
-    else setStudioStatus("Script तैयार है। Edit करें या अगला step चुनें।");
+    else if (!activeJob.renderedVideoFile) setStudioStatus("Script तैयार है। Edit करें या अगला step चुनें।");
   }
 
   async function generateScript(opening = false) {
@@ -2189,9 +2235,29 @@
       if (currentVideoUrl) URL.revokeObjectURL(currentVideoUrl);
       currentVideoBlob = blob;
       currentVideoJobId = activeJob.id;
+      currentVideoSavedLocally = false;
       currentVideoExtension = extension;
       currentVideoNeedsUpload = true;
       currentVideoUrl = URL.createObjectURL(blob);
+
+      let localSaveMessage = "Video केवल इस browser tab में है। Refresh से पहले Download video दबाकर सुरक्षित रखें।";
+      try {
+        const saveResponse = await fetch("/api/jobs/" + encodeURIComponent(activeJob.id) + "/rendered-video", {
+          method: "PUT",
+          headers: { "Content-Type": mimeType.split(";")[0] },
+          body: blob
+        });
+        const saved = await saveResponse.json().catch(() => ({}));
+        if (!saveResponse.ok) throw new Error(saved.error || "Project outputs folder में save नहीं हो पाई।");
+        activeJob = saved.job;
+        currentVideoSavedLocally = true;
+        localSaveMessage = "Project outputs में सुरक्षित save हो गई · refresh या server restart के बाद भी वापस खुलेगी।";
+        await loadJobs();
+        refreshBufferPublishControls();
+      } catch (saveError) {
+        localSaveMessage = "Local save नहीं हो पाई: " + (saveError.message || "Unknown error") +
+          " · Refresh से पहले Download video दबाएँ।";
+      }
       const videoPreview = document.getElementById("videoPreview");
       videoPreview.src = currentVideoUrl;
       const download = document.getElementById("videoDownload");
@@ -2211,7 +2277,7 @@
       setStudioStatus(
         "Slide video और Hindi subtitle file तैयार हैं · final video लगभग " +
         totalSec.toFixed(1) + " sec। " +
-        (audioBuffer ? "Video की अवधि actual Hindi voice के अनुसार रखी गई है।" : "Voice के बिना selected duration इस्तेमाल हुई है।")
+        (audioBuffer ? "Video की अवधि actual Hindi voice के अनुसार रखी गई है।" : "Voice के बिना selected duration इस्तेमाल हुई है।") + localSaveMessage
       );
       if (audioContext) await audioContext.close();
       return true;

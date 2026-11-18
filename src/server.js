@@ -9,6 +9,7 @@ import { buildCloudflareScenePrompt } from "./image-prompt.js";
 import { getAlternateShotType, getVideoVisualPlan, getVisualImageTargets } from "./visual-plan.js";
 import { classifyCloudflareImageError } from "./cloudflare-errors.js";
 import { buildBufferVideoPostInput, validatePublicVideoUrl } from "./buffer-api.js";
+import { buildRenderedVideoFileName, getRenderedVideoExtension } from "./rendered-video.js";
 import { assertBufferPublishAllowed, recordBufferQueuePost, resetBufferApprovalIfContentChanged } from "./publishing-guard.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -883,6 +884,42 @@ app.post("/api/jobs", (req, res) => {
   res.status(201).json(job);
 });
 
+app.put("/api/jobs/:id/rendered-video", express.raw({ type: "video/*", limit: "250mb" }), async (req, res) => {
+  const { jobs, job } = findJob(req.params.id);
+  if (!job) return res.status(404).json({ error: "Video brief not found." });
+  if (!Buffer.isBuffer(req.body) || req.body.length < 1000) {
+    return res.status(400).json({ error: "Rendered video upload खाली है या सही नहीं है।" });
+  }
+  let extension, fileName;
+  try {
+    extension = getRenderedVideoExtension(req.headers["content-type"]);
+    fileName = buildRenderedVideoFileName(job.id, extension);
+  } catch (error) {
+    return res.status(415).json({ error: error.message || "Only MP4 and WebM videos are supported." });
+  }
+  try {
+    const previousFile = job.renderedVideoFile;
+    await fs.promises.writeFile(path.join(OUTPUT_DIR, fileName), req.body);
+    resetBufferApprovalIfContentChanged(job);
+    job.renderedVideoFile = fileName;
+    job.renderedVideoMimeType = extension === "mp4" ? "video/mp4" : "video/webm";
+    job.renderedVideoSizeBytes = req.body.length;
+    job.renderedVideoSavedAt = new Date().toISOString();
+    job.updatedAt = new Date().toISOString();
+    writeJobs(jobs);
+    if (previousFile && previousFile !== fileName) {
+      fs.rmSync(path.join(OUTPUT_DIR, path.basename(previousFile)), { force: true });
+    }
+    for (const otherExtension of ["mp4", "webm"]) {
+      const other = buildRenderedVideoFileName(job.id, otherExtension);
+      if (other !== fileName) fs.rmSync(path.join(OUTPUT_DIR, other), { force: true });
+    }
+    res.json({ ok: true, job, video: { file: fileName, mimeType: job.renderedVideoMimeType, sizeBytes: job.renderedVideoSizeBytes } });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Rendered video project outputs folder में save नहीं हो पाई।" });
+  }
+});
+
 app.post("/api/jobs/:id/generate-script", async (req, res) => {
   const { jobs, job } = findJob(req.params.id);
   if (!job) return res.status(404).json({ error: "Video brief not found." });
@@ -1175,7 +1212,7 @@ app.post("/api/jobs/:id/generate-scene-images", async (req, res) => {
         savedImages.push(item);
       }
       job.sceneImages = savedImages;
-      resetBufferApprovalIfContentChanged(job);
+      resetBufferApprovalIfContentChanged(job, { invalidateRenderedVideo: true });
       job.updatedAt = new Date().toISOString();
       writeJobs(jobs);
       results.push(item);
@@ -1459,7 +1496,7 @@ app.post("/api/jobs/:id/generate-voice", async (req, res) => {
     job.script = narration;
     if (job.scriptData) job.scriptData.voiceover = narration;
     job.voiceFile = "/outputs/" + safeFile;
-    resetBufferApprovalIfContentChanged(job);
+    resetBufferApprovalIfContentChanged(job, { invalidateRenderedVideo: true });
     job.voiceDurationSec = Number(audioDurationSec.toFixed(2));
     job.voiceDurationMatchesTarget = durationMatchesTarget;
     job.voiceMode = voiceMode;
@@ -1496,6 +1533,9 @@ app.delete("/api/jobs/:id", (req, res) => {
   writeJobs(jobs);
   try {
     if (deletedJob.voiceFile) fs.rmSync(path.join(OUTPUT_DIR, path.basename(deletedJob.voiceFile)), { force: true });
+    for (const extension of ["mp4", "webm"]) {
+      fs.rmSync(path.join(OUTPUT_DIR, buildRenderedVideoFileName(deletedJob.id, extension)), { force: true });
+    }
     for (const image of deletedJob.sceneImages || []) {
       if (image.url) fs.rmSync(path.join(OUTPUT_DIR, path.basename(image.url)), { force: true });
     }
@@ -1516,6 +1556,7 @@ app.patch("/api/jobs/:id", (req, res) => {
     voiceFile: job.voiceFile
   });
   const previousVoiceover = String(job.scriptData?.voiceover || job.script || "");
+  const previousVideoSource = JSON.stringify({ script: job.script, scriptData: job.scriptData, sceneImages: job.sceneImages, voiceFile: job.voiceFile });
   const previousVisualPlan = JSON.stringify((job.scriptData?.scenes || []).map(scene =>
     [scene.visual_direction, scene.shot_type]
   ));
@@ -1562,6 +1603,7 @@ app.patch("/api/jobs/:id", (req, res) => {
   if (job.scriptData?.scenes?.length) {
     job.visualPlan = getVideoVisualPlan(job.duration, job.scriptData.scenes.length);
   }
+  const nextVideoSource = JSON.stringify({ script: job.script, scriptData: job.scriptData, sceneImages: job.sceneImages, voiceFile: job.voiceFile });
   const nextReviewContent = JSON.stringify({
     script: job.script,
     scriptData: job.scriptData,
@@ -1569,7 +1611,9 @@ app.patch("/api/jobs/:id", (req, res) => {
     sceneImages: job.sceneImages,
     voiceFile: job.voiceFile
   });
-  if (nextReviewContent !== previousReviewContent) resetBufferApprovalIfContentChanged(job);
+  if (nextReviewContent !== previousReviewContent) {
+    resetBufferApprovalIfContentChanged(job, { invalidateRenderedVideo: nextVideoSource !== previousVideoSource });
+  }
   job.updatedAt = new Date().toISOString();
   writeJobs(jobs);
   res.json(job);
