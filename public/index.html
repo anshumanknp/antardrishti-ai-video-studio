@@ -722,8 +722,8 @@
     if (!brandLogoImage || !brandLogoImage.complete ||
         !brandLogoImage.naturalWidth || !brandLogoImage.naturalHeight) return;
 
-    const maxWidth = 230;
-    const maxHeight = 112;
+    const maxWidth = 200;
+    const maxHeight = 100;
     const scale = Math.min(
       maxWidth / brandLogoImage.naturalWidth,
       maxHeight / brandLogoImage.naturalHeight,
@@ -731,8 +731,8 @@
     );
     const drawWidth = brandLogoImage.naturalWidth * scale;
     const drawHeight = brandLogoImage.naturalHeight * scale;
-    const x = canvasWidth - 160 - drawWidth;
-    const y = 205 + (maxHeight - drawHeight) / 2;
+    const x = canvasWidth - 190 - drawWidth;
+    const y = 260 + (maxHeight - drawHeight) / 2;
 
     context.save();
     context.globalAlpha = 0.96;
