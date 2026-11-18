@@ -8,11 +8,17 @@ function fingerprintVideoUrl(videoUrl) {
 
 export function resetBufferApprovalIfContentChanged(job) {
   if (!job || typeof job !== "object") return false;
+  let changed = false;
   if (job.status === "approved" || job.status === "exported") {
     job.status = "review";
-    return true;
+    changed = true;
   }
-  return false;
+  // A hosted video belongs to one exact render. Content changes require a fresh upload.
+  if (job.bufferVideoUrl) {
+    delete job.bufferVideoUrl;
+    changed = true;
+  }
+  return changed;
 }
 
 export function assertBufferPublishAllowed(job, { channelId, videoUrl }) {

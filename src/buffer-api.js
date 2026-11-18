@@ -1,5 +1,21 @@
 const SUPPORTED_SERVICES = new Set(["facebook", "instagram", "youtube"]);
 
+export function validatePublicVideoUrl(videoUrl) {
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(String(videoUrl || ""));
+  } catch {
+    throw new Error("Video URL must be a valid public HTTPS URL.");
+  }
+  if (parsedUrl.protocol !== "https:" || parsedUrl.username || parsedUrl.password) {
+    throw new Error("Video URL must be a public HTTPS URL without login credentials.");
+  }
+  if (isNonPublicHost(parsedUrl.hostname)) {
+    throw new Error("Private or local video URLs cannot be fetched by Buffer. Use a public video URL.");
+  }
+  return parsedUrl.toString();
+}
+
 function isNonPublicHost(hostname) {
   const host = String(hostname || "").toLowerCase().replace(/^\[|\]$/g, "");
   if (["localhost", "localhost.localdomain", "::1", "0.0.0.0"].includes(host)) return true;
@@ -36,18 +52,7 @@ export function buildBufferVideoPostInput({
     throw new Error("Only Facebook, Instagram and YouTube channels are supported.");
   }
 
-  let parsedUrl;
-  try {
-    parsedUrl = new URL(String(videoUrl || ""));
-  } catch {
-    throw new Error("Video URL must be a valid public HTTPS URL.");
-  }
-  if (parsedUrl.protocol !== "https:" || parsedUrl.username || parsedUrl.password) {
-    throw new Error("Video URL must be a public HTTPS URL without login credentials.");
-  }
-  if (isNonPublicHost(parsedUrl.hostname)) {
-    throw new Error("Private or local video URLs cannot be fetched by Buffer. Use a public video URL.");
-  }
+  const parsedUrl = new URL(validatePublicVideoUrl(videoUrl));
 
   const copy = platformCopy && typeof platformCopy === "object" ? platformCopy : {};
   const assets = [{ video: { url: parsedUrl.toString() } }];

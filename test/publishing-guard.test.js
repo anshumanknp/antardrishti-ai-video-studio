@@ -94,3 +94,10 @@ test("queue records keep the video URL fingerprint, not the raw URL", () => {
   assert.equal("videoUrl" in record, false);
   assert.equal(job.bufferQueuedPosts.length, 1);
 });
+
+test("content changes clear the hosted media URL so a new render must be uploaded", () => {
+  const job = { status: "approved", bufferVideoUrl: "https://cdn.example.com/old.mp4" };
+  assert.equal(resetBufferApprovalIfContentChanged(job), true);
+  assert.equal(job.status, "review");
+  assert.equal("bufferVideoUrl" in job, false);
+});

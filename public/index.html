@@ -184,6 +184,12 @@
     .social-copy-note, .buffer-help { margin:7px 0; color:#9eafc4; font-size:10px; line-height:1.55; }
     .buffer-grid { display:grid; grid-template-columns:1fr 1fr; gap:11px; align-items:end; margin-top:12px; }
     .buffer-grid .wide { grid-column:1/-1; }
+    .buffer-channel-selector { margin-top:12px; }
+    .buffer-channel-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:8px; }
+    .buffer-channel-option { display:flex; align-items:center; gap:9px; min-width:0; margin:0; padding:10px 11px; border:1px solid #34465e; border-radius:8px; background:#19273a; color:#dce5ef; cursor:pointer; }
+    .buffer-channel-option input { flex:0 0 auto; width:16px; min-height:16px; margin:0; accent-color:var(--gold); }
+    .buffer-channel-option span { min-width:0; overflow-wrap:anywhere; font-size:11px; }
+    .buffer-channel-option small { display:block; margin-top:3px; color:#8fa0b5; font-size:9px; }
     .buffer-status-pill { color:#a9b9cb; border:1px solid #40536c; border-radius:20px; padding:5px 9px; font-size:10px; }
     .buffer-status-pill.connected { color:var(--green); border-color:#376b57; }
     .buffer-result { min-height:18px; margin:9px 0 0; color:var(--green); font-size:11px; }
@@ -517,11 +523,15 @@
               <h3>YouTube Shorts</h3>
               <label for="youtubeTitle">VIDEO TITLE · MAX 100 CHARACTERS</label>
               <input class="title-input" id="youtubeTitle" maxlength="100" placeholder="YouTube title…">
-              <label for="youtubeDescription">DESCRIPTION</label>
-              <textarea id="youtubeDescription" maxlength="5000" placeholder="YouTube description और hashtags…"></textarea>
+              <label for="youtubeDescription">SEO DESCRIPTION · HASHTAGS</label>
+              <textarea id="youtubeDescription" maxlength="5000" placeholder="SEO-optimised YouTube description…"></textarea>
+              <label for="youtubeTags">YOUTUBE SEO KEYWORDS · COMMA SEPARATED</label>
+              <textarea id="youtubeTags" maxlength="500" style="min-height:76px" placeholder="mindfulness, self awareness, hindi meditation…"></textarea>
+              <p class="social-copy-note">Buffer API YouTube title और description भेजता है, लेकिन अलग native video-tags field उपलब्ध नहीं कराता। SEO keyword suggestions यहाँ save रहेंगी और मुख्य phrases title/description में स्वाभाविक रूप से शामिल होंगे।</p>
               <div class="social-copy-actions">
                 <button class="secondary-btn" type="button" id="copyYoutubeTitleBtn">Copy Title</button>
                 <button class="secondary-btn" type="button" id="copyYoutubeDescriptionBtn">Copy Description</button>
+                <button class="secondary-btn" type="button" id="copyYoutubeTagsBtn">Copy SEO Keywords</button>
               </div>
             </article>
           </div>
@@ -536,17 +546,11 @@
             <h2 id="bufferPublishTitle">Buffer Publishing</h2>
             <span class="buffer-status-pill" id="bufferConnectionStatus">Not connected</span>
           </div>
-          <p class="buffer-help">यहाँ से चुने हुए Facebook Reel, Instagram Reel या YouTube channel की Buffer Queue में video post भेजें। इसके लिए Buffer API key और public HTTPS video URL चाहिए।</p>
-          <div class="buffer-grid">
-            <div>
-              <label for="bufferChannelSelect">BUFFER CHANNEL</label>
-              <select id="bufferChannelSelect" disabled>
-                <option value="">Connect Buffer first…</option>
-              </select>
-            </div>
-            <div>
-              <label for="bufferVideoUrl">PUBLIC VIDEO URL · HTTPS</label>
-              <input id="bufferVideoUrl" type="url" placeholder="https://your-public-host/video.mp4">
+          <p class="buffer-help">Final video एक बार Cloudinary पर अपने-आप upload होगा। फिर एक ही click से चुने हुए Facebook, Instagram और YouTube channels पर उनकी अलग-अलग saved captions/title के साथ Buffer Queue में जाएगा। URL copy-paste नहीं करना होगा।</p>
+          <div class="buffer-channel-selector">
+            <label>BUFFER CHANNELS · SELECT THE CHANNELS TO QUEUE</label>
+            <div class="buffer-channel-list" id="bufferChannelList" aria-live="polite">
+              <p class="buffer-help">पहले Buffer connect करें।</p>
             </div>
           </div>
           <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-weight:500">
@@ -555,10 +559,11 @@
           </label>
           <div class="buffer-actions">
             <button class="secondary-btn" id="refreshBufferChannelsBtn" type="button">Connect / Refresh Buffer</button>
-            <button class="primary-btn" id="sendToBufferBtn" type="button" disabled>Add Video to Buffer Queue</button>
+            <button class="primary-btn" id="sendToBufferBtn" type="button" disabled>Queue to Selected Channels</button>
           </div>
-          <p class="buffer-help" id="bufferSetupNote">Buffer API key को project की local .env file में BUFFER_API_KEY= के बाद रखें। API key chat या GitHub में share न करें।</p>
-          <p class="buffer-help" id="bufferApprovalNote">Publishing तभी खुलेगी जब dashboard में इस video का status Approved होगा।</p>
+          <p class="buffer-help" id="bufferSetupNote">Buffer API key project की local .env file में सुरक्षित रखें। इसे chat या GitHub में share न करें।</p>
+          <p class="buffer-help" id="bufferHostingNote">पहली बार चलाने से पहले Cloudinary का one-time upload setup पूरा करें।</p>
+          <p class="buffer-help" id="bufferApprovalNote">Final video और platform copy review करके job को Approved करें। उसके बाद एक click में queue करें।</p>
           <div class="buffer-help" id="bufferQueueHistory" aria-live="polite">इस video के लिए अभी Buffer Queue history नहीं है।</div>
           <p class="buffer-result" id="bufferResult" role="status"></p>
         </section>
@@ -692,8 +697,14 @@
   let activeJob = null;
   let activeScriptData = null;
   let currentVideoUrl = null;
+  let currentVideoBlob = null;
+  let currentVideoJobId = null;
+  let currentVideoExtension = "mp4";
+  let currentVideoNeedsUpload = false;
   let currentSubtitleUrl = null;
   let imageGenerationEnabled = false;
+  let bufferChannels = [];
+  let cloudinaryConfig = null;
   let brandLogoImage = null;
   let brandLogoMeta = null;
   let brandLogoLoadPromise = Promise.resolve(false);
@@ -1183,7 +1194,8 @@
       facebookCaption: document.getElementById("facebookCaption").value.trim(),
       instagramCaption: document.getElementById("instagramCaption").value.trim(),
       youtubeTitle: document.getElementById("youtubeTitle").value.trim(),
-      youtubeDescription: document.getElementById("youtubeDescription").value.trim()
+      youtubeDescription: document.getElementById("youtubeDescription").value.trim(),
+      youtubeTags: document.getElementById("youtubeTags").value.trim()
     };
   }
 
@@ -1193,6 +1205,7 @@
     document.getElementById("instagramCaption").value = data.instagramCaption || "";
     document.getElementById("youtubeTitle").value = data.youtubeTitle || "";
     document.getElementById("youtubeDescription").value = data.youtubeDescription || "";
+    document.getElementById("youtubeTags").value = data.youtubeTags || "";
     document.getElementById("socialCopyNote").textContent = data.facebookCaption
       ? "Saved social copy loaded. You can edit it before copying or scheduling."
       : "Social copy अभी generate नहीं हुई है।";
@@ -1214,17 +1227,39 @@
     }).join("") + "</ul>";
   }
 
+  function getSelectedBufferChannelIds() {
+    return Array.from(document.querySelectorAll('input[name="bufferChannel"]:checked'))
+      .map(input => input.value);
+  }
+
   function refreshBufferPublishControls() {
     const approved = activeJob?.status === "approved";
     const savedCopy = isCurrentPlatformCopySaved();
-    const hasChannel = Boolean(document.getElementById("bufferChannelSelect").value);
-    const hasVideoUrl = Boolean(document.getElementById("bufferVideoUrl").value.trim());
-    document.getElementById("sendToBufferBtn").disabled = !(approved && savedCopy && hasChannel && hasVideoUrl);
+    const selectedChannels = getSelectedBufferChannelIds();
+    const hasCurrentRender = Boolean(currentVideoBlob && currentVideoJobId === activeJobId);
+    const hasVideo = Boolean(activeJob?.bufferVideoUrl || hasCurrentRender);
+    const canHostVideo = Boolean(activeJob?.bufferVideoUrl ||
+      (hasCurrentRender && cloudinaryConfig?.configured));
+    document.getElementById("sendToBufferBtn").disabled =
+      !(approved && savedCopy && selectedChannels.length && hasVideo && canHostVideo);
     document.getElementById("bufferApprovalNote").textContent = !approved
-      ? "Publishing बंद है। पहले final video और captions जाँचें, फिर dashboard में इस job का status Approved करें।"
+      ? "Publishing बंद है। पहले final video और captions review करके dashboard में status Approved करें।"
       : !savedCopy
-        ? "Platform copy में unsaved बदलाव हैं। Save Social Copy करें; content बदलने पर job को दोबारा Approved करना होगा।"
-        : "यह video और saved platform copy Approved हैं। सही public HTTPS video URL जाँचकर Queue में भेजें।";
+        ? "Platform copy में unsaved बदलाव हैं। Save Social Copy करें; फिर job को दोबारा Approved करें।"
+        : !hasVideo
+          ? "पहले Script Studio में final video बनाएं।"
+          : !selectedChannels.length
+            ? "कम-से-कम एक Buffer channel चुनें। तीनों selected रहने पर तीनों पर एक साथ queue होगा।"
+            : "Final video और saved platform copy Approved हैं। एक click से selected channels पर queue करें।";
+
+    const hostingNote = document.getElementById("bufferHostingNote");
+    if (activeJob?.bufferVideoUrl && !currentVideoNeedsUpload) {
+      hostingNote.textContent = "इस job का hosted video पहले से तैयार है। दोबारा upload नहीं होगा।";
+    } else if (cloudinaryConfig?.configured) {
+      hostingNote.textContent = "Cloudinary connected · final video पहली बार अपने-आप upload होगा और URL सुरक्षित रूप से job में save रहेगा।";
+    } else {
+      hostingNote.textContent = "Cloudinary one-time setup बाकी है। .env में CLOUDINARY_CLOUD_NAME और CLOUDINARY_UPLOAD_PRESET जोड़ें, फिर server restart करें।";
+    }
   }
 
   function isCurrentPlatformCopySaved() {
@@ -1320,7 +1355,7 @@
 
   async function refreshBufferChannels() {
     const button = document.getElementById("refreshBufferChannelsBtn");
-    const select = document.getElementById("bufferChannelSelect");
+    const list = document.getElementById("bufferChannelList");
     button.disabled = true;
     button.textContent = "Checking Buffer…";
     setBufferStatus("Connecting…");
@@ -1328,8 +1363,9 @@
       const response = await fetch("/api/buffer/status");
       const result = await response.json();
       if (!response.ok || !result.connected) {
-        select.innerHTML = '<option value="">Buffer API not configured</option>';
-        select.disabled = true;
+        bufferChannels = [];
+        cloudinaryConfig = null;
+        list.innerHTML = '<p class="buffer-help">Buffer API connection नहीं है।</p>';
         document.getElementById("sendToBufferBtn").disabled = true;
         const message = result.message || result.error || "Buffer connection failed.";
         setBufferStatus(result.configured ? "Connection error" : "API key needed", false, true);
@@ -1337,25 +1373,31 @@
         throw new Error(message);
       }
 
-      const channels = (result.organizations || []).flatMap(org =>
+      bufferChannels = (result.organizations || []).flatMap(org =>
         (org.channels || []).map(channel => ({ ...channel, organizationName: org.name }))
       ).filter(channel => ["facebook", "instagram", "youtube"].includes(String(channel.service || "").toLowerCase()));
+      cloudinaryConfig = result.mediaHosting || null;
 
-      select.innerHTML = '<option value="">Select a connected channel…</option>' +
-        channels.map(channel =>
-          '<option value="' + escapeHtml(channel.id) + '">' +
-          escapeHtml(channel.service.toUpperCase() + " · " + channel.name) +
-          '</option>'
-        ).join("");
-      select.disabled = channels.length === 0;
-      document.getElementById("sendToBufferBtn").disabled = true;
-      setBufferStatus(channels.length ? "Connected · " + channels.length + " channels" : "No supported channels", channels.length > 0);
-      document.getElementById("bufferSetupNote").textContent = channels.length
-        ? "Connected to Buffer. Select the channel, paste a public video URL, then add it to the Queue."
-        : "Buffer connected, but no Facebook, Instagram or YouTube channel was found in this organization.";
+      const defaultSelectedServices = new Set();
+      list.innerHTML = bufferChannels.map(channel => {
+        const service = String(channel.service || "").toLowerCase();
+        const checked = !defaultSelectedServices.has(service);
+        if (checked) defaultSelectedServices.add(service);
+        const channelLabel = service.toUpperCase() + " · " + channel.name;
+        const orgLabel = channel.organizationName ? '<small>' + escapeHtml(channel.organizationName) + '</small>' : "";
+        return '<label class="buffer-channel-option">' +
+          '<input type="checkbox" name="bufferChannel" value="' + escapeHtml(channel.id) + '"' +
+          (checked ? ' checked' : '') + '>' +
+          '<span>' + escapeHtml(channelLabel) + orgLabel + '</span></label>';
+      }).join("") || '<p class="buffer-help">Connected Buffer account में supported Facebook, Instagram या YouTube channel नहीं मिला।</p>';
+
+      setBufferStatus(bufferChannels.length ? "Connected · " + bufferChannels.length + " channels" : "No supported channels", bufferChannels.length > 0);
+      document.getElementById("bufferSetupNote").textContent = bufferChannels.length
+        ? "Buffer connected. हर platform का पहला channel default selected है; चाहें तो selection बदलें।"
+        : "Buffer connected, but no Facebook, Instagram or YouTube channel was found.";
       document.getElementById("bufferResult").textContent = "";
+      refreshBufferPublishControls();
     } catch (error) {
-      setBufferStatus("Not connected", false, true);
       if (error.message) document.getElementById("bufferSetupNote").textContent = error.message;
     } finally {
       button.disabled = false;
@@ -1364,65 +1406,127 @@
     }
   }
 
-  async function sendVideoToBuffer() {
+  async function getHostedBufferVideoUrl() {
+    if (activeJob?.bufferVideoUrl && !currentVideoNeedsUpload) return activeJob.bufferVideoUrl;
+    if (!currentVideoBlob || currentVideoJobId !== activeJobId) {
+      throw new Error("पहले इसी video job में final video बनाएं।");
+    }
+    if (!cloudinaryConfig?.configured || !cloudinaryConfig.cloudName || !cloudinaryConfig.uploadPreset) {
+      throw new Error("Cloudinary one-time setup बाकी है। .env में CLOUDINARY_CLOUD_NAME और CLOUDINARY_UPLOAD_PRESET जोड़ें, फिर server restart करें।");
+    }
+
+    const mimeType = String(currentVideoBlob.type || "");
+    if (!mimeType.startsWith("video/mp4") && !mimeType.startsWith("video/webm")) {
+      throw new Error("Browser ने MP4 या WebM video नहीं बनाया। Final video फिर से render करें।");
+    }
+
+    const formData = new FormData();
+    const fileName = "antardrishti-" + activeJobId.slice(0, 8) + "." + currentVideoExtension;
+    formData.append("file", currentVideoBlob, fileName);
+    formData.append("upload_preset", cloudinaryConfig.uploadPreset);
+
+    const uploadEndpoint = "https://api.cloudinary.com/v1_1/" +
+      encodeURIComponent(cloudinaryConfig.cloudName) + "/video/upload";
+    const uploadResponse = await fetch(uploadEndpoint, { method: "POST", body: formData });
+    const uploadResult = await uploadResponse.json().catch(() => ({}));
+    if (!uploadResponse.ok) {
+      throw new Error(uploadResult.error?.message || "Cloudinary upload नहीं हो पाया। Upload preset और file-size limit जाँचें।");
+    }
+
+    let videoUrl = uploadResult.secure_url || "";
+    if (mimeType.startsWith("video/webm")) {
+      const mp4Transform = (Array.isArray(uploadResult.eager) ? uploadResult.eager : [])
+        .find(item => /\.mp4(?:$|\?)/i.test(String(item.secure_url || item.url || "")));
+      videoUrl = mp4Transform?.secure_url || mp4Transform?.url || "";
+      if (!videoUrl) {
+        throw new Error("Browser ने WebM बनाया। Cloudinary upload preset में synchronous MP4/H.264 eager conversion enable करना होगा। README में setup steps देखें।");
+      }
+    }
+    if (!videoUrl.startsWith("https://")) {
+      throw new Error("Cloudinary ने public HTTPS video URL नहीं लौटाया।");
+    }
+
+    const saveResponse = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/buffer/media", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ videoUrl })
+    });
+    const saved = await saveResponse.json();
+    if (!saveResponse.ok) throw new Error(saved.error || "Hosted video URL job में save नहीं हो पाया।");
+    activeJob = saved.job;
+    currentVideoNeedsUpload = false;
+    return videoUrl;
+  }
+
+  async function sendVideoToBufferAll() {
     if (!activeJobId) return;
-    const channelId = document.getElementById("bufferChannelSelect").value;
-    const videoUrl = document.getElementById("bufferVideoUrl").value.trim();
-    const platformCopy = readPlatformCopyFromFields();
+    const channelIds = getSelectedBufferChannelIds();
     const resultHost = document.getElementById("bufferResult");
     const button = document.getElementById("sendToBufferBtn");
+
     if (!activeJob || activeJob.status !== "approved") {
       resultHost.textContent = "पहले final video और captions review करें, फिर dashboard में status Approved करें।";
       resultHost.classList.add("error");
       refreshBufferPublishControls();
       return;
     }
-    if (!channelId) {
-      resultHost.textContent = "पहले Buffer channel चुनें।";
-      resultHost.classList.add("error");
-      return;
-    }
-    if (!videoUrl) {
-      resultHost.textContent = "पहले video की public HTTPS URL डालें।";
+    if (!channelIds.length) {
+      resultHost.textContent = "कम-से-कम एक Buffer channel चुनें।";
       resultHost.classList.add("error");
       return;
     }
     if (!isCurrentPlatformCopySaved()) {
-      resultHost.textContent = "Platform copy में unsaved changes हैं। पहले Save Social Copy करें, फिर job को दोबारा Approved करें।";
+      resultHost.textContent = "Captions या YouTube SEO keywords में unsaved बदलाव हैं। पहले Save Social Copy करें और फिर job को दोबारा Approved करें।";
       resultHost.classList.add("error");
       return;
     }
+
     button.disabled = true;
-    button.textContent = "Sending to Buffer…";
     resultHost.classList.remove("error");
-    resultHost.textContent = "Post Buffer Queue में भेजी जा रही है…";
     try {
-      const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/buffer/queue", {
+      resultHost.textContent = "Final video Cloudinary पर upload हो रहा है…";
+      button.textContent = "Uploading video…";
+      const videoUrl = await getHostedBufferVideoUrl();
+
+      resultHost.textContent = "एक ही video selected Buffer channels पर भेजी जा रही है…";
+      button.textContent = "Queueing " + channelIds.length + " channel(s)…";
+      const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/buffer/queue-all", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          channelId,
+          channelIds,
           videoUrl,
-          platformCopy,
           isAiGenerated: document.getElementById("bufferAiDisclosure").checked
         })
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Buffer Queue में post नहीं जा पाई।");
-      const due = result.post?.dueAt ? " · " + new Date(result.post.dueAt).toLocaleString("en-IN") : "";
-      resultHost.textContent = "Added to " + result.channelName + " Buffer Queue" + due + ".";
-      resultHost.classList.remove("error");
+      if (!response.ok && !(Number(result.queuedCount) > 0)) {
+        const failures = (result.failures || []).map(item =>
+          (item.channelName || item.platform || item.channelId) + ": " + item.error
+        ).join(" · ");
+        throw new Error(failures || result.error || "Buffer Queue में posts नहीं जा पाईं।");
+      }
+
       if (result.job) {
         activeJob = result.job;
         renderBufferQueueHistory(activeJob);
       }
-      document.getElementById("bufferVideoUrl").value = "";
-      refreshBufferPublishControls();
+      const queuedNames = (result.results || []).map(item =>
+        String(item.platform || "").toUpperCase() + " · " + (item.channelName || "Channel")
+      );
+      const failedNames = (result.failures || []).map(item =>
+        (item.channelName || item.platform || "Channel") + ": " + item.error
+      );
+      resultHost.textContent = Number(result.queuedCount || 0) +
+        " post(s) Buffer Queue में add हुईं" +
+        (queuedNames.length ? " — " + queuedNames.join(", ") : "") +
+        (Number(result.failedCount || 0) ? ". Failed: " + failedNames.join(" | ") : ".");
+      resultHost.classList.toggle("error", Number(result.failedCount || 0) > 0);
     } catch (error) {
-      resultHost.textContent = error.message || "Buffer में post नहीं जा पाई।";
+      resultHost.textContent = error.message || "Buffer publishing पूरा नहीं हो पाया।";
       resultHost.classList.add("error");
     } finally {
-      button.textContent = "Add Video to Buffer Queue";
+      button.textContent = "Queue to Selected Channels";
       refreshBufferPublishControls();
     }
   }
@@ -1457,10 +1561,14 @@
   }
 
   async function openScriptStudio(jobId) {
-    document.getElementById("bufferVideoUrl").value = "";
-    refreshBufferChannels();
     activeJobId = jobId;
     activeJob = jobs.find(job => job.id === jobId) || null;
+    if (currentVideoJobId !== jobId) {
+      currentVideoBlob = null;
+      currentVideoNeedsUpload = false;
+      currentVideoJobId = jobId;
+    }
+    refreshBufferChannels();
     if (!activeJob) return;
     setStudioStatus("Video brief खुल रहा है…");
     displayScript(activeJob);
@@ -2079,6 +2187,10 @@
       if (blob.size < 1000) throw new Error("Video file नहीं बन पाई। फिर कोशिश करें।");
 
       if (currentVideoUrl) URL.revokeObjectURL(currentVideoUrl);
+      currentVideoBlob = blob;
+      currentVideoJobId = activeJob.id;
+      currentVideoExtension = extension;
+      currentVideoNeedsUpload = true;
       currentVideoUrl = URL.createObjectURL(blob);
       const videoPreview = document.getElementById("videoPreview");
       videoPreview.src = currentVideoUrl;
@@ -2122,13 +2234,13 @@
   document.getElementById("copyInstagramCaptionBtn").addEventListener("click", () => copySocialField("instagramCaption", "Instagram caption"));
   document.getElementById("copyYoutubeTitleBtn").addEventListener("click", () => copySocialField("youtubeTitle", "YouTube title"));
   document.getElementById("copyYoutubeDescriptionBtn").addEventListener("click", () => copySocialField("youtubeDescription", "YouTube description"));
+  document.getElementById("copyYoutubeTagsBtn").addEventListener("click", () => copySocialField("youtubeTags", "YouTube SEO keywords"));
   document.getElementById("refreshBufferChannelsBtn").addEventListener("click", refreshBufferChannels);
-  document.getElementById("bufferChannelSelect").addEventListener("change", refreshBufferPublishControls);
-  document.getElementById("bufferVideoUrl").addEventListener("input", refreshBufferPublishControls);
-  ["facebookCaption", "instagramCaption", "youtubeTitle", "youtubeDescription"].forEach(id => {
+  document.getElementById("bufferChannelList").addEventListener("change", refreshBufferPublishControls);
+  ["facebookCaption", "instagramCaption", "youtubeTitle", "youtubeDescription", "youtubeTags"].forEach(id => {
     document.getElementById(id).addEventListener("input", refreshBufferPublishControls);
   });
-  document.getElementById("sendToBufferBtn").addEventListener("click", sendVideoToBuffer);
+  document.getElementById("sendToBufferBtn").addEventListener("click", sendVideoToBufferAll);
   document.getElementById("reelsSafeAreaToggle").addEventListener("change", event => {
     document.getElementById("reelsSafeAreaOverlay").hidden = !event.target.checked;
   });
