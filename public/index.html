@@ -868,6 +868,7 @@
       button.disabled = !imageGenerationEnabled || !activeScriptData;
       button.textContent = imageGenerationEnabled ? "Generate / Refresh Scene Images (Free API)" : "Scene Images · Not configured";
       document.getElementById("autoCreateVideoBtn").disabled = !imageGenerationEnabled || !activeScriptData;
+    document.getElementById("generateSocialCopyBtn").disabled = !activeScriptData;
     } catch {
       imageGenerationEnabled = false;
       note.textContent = "Image API status check नहीं हो पाया। Free API configure होने तक generation बंद रहेगी।";
@@ -1013,6 +1014,196 @@
     }
   }
 
+  function readPlatformCopyFromFields() {
+    return {
+      facebookCaption: document.getElementById("facebookCaption").value.trim(),
+      instagramCaption: document.getElementById("instagramCaption").value.trim(),
+      youtubeTitle: document.getElementById("youtubeTitle").value.trim(),
+      youtubeDescription: document.getElementById("youtubeDescription").value.trim()
+    };
+  }
+
+  function writePlatformCopyToFields(copy) {
+    const data = copy && typeof copy === "object" ? copy : {};
+    document.getElementById("facebookCaption").value = data.facebookCaption || "";
+    document.getElementById("instagramCaption").value = data.instagramCaption || "";
+    document.getElementById("youtubeTitle").value = data.youtubeTitle || "";
+    document.getElementById("youtubeDescription").value = data.youtubeDescription || "";
+    document.getElementById("socialCopyNote").textContent = data.facebookCaption
+      ? "Saved social copy loaded. You can edit it before copying or scheduling."
+      : "Social copy अभी generate नहीं हुई है।";
+  }
+
+  async function copySocialField(fieldId, label) {
+    const value = document.getElementById(fieldId).value.trim();
+    if (!value) {
+      document.getElementById("socialCopyNote").textContent = label + " अभी खाली है।";
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+      document.getElementById("socialCopyNote").textContent = label + " copied.";
+    } catch {
+      const helper = document.createElement("textarea");
+      helper.value = value;
+      helper.style.position = "fixed";
+      helper.style.opacity = "0";
+      document.body.append(helper);
+      helper.select();
+      const copied = document.execCommand("copy");
+      helper.remove();
+      document.getElementById("socialCopyNote").textContent = copied
+        ? label + " copied."
+        : "Copy नहीं हो पाया। Text select करके manually copy करें।";
+    }
+  }
+
+  async function generateSocialCopy() {
+    if (!activeJobId || !activeScriptData) return;
+    const button = document.getElementById("generateSocialCopyBtn");
+    button.disabled = true;
+    button.textContent = "Generating…";
+    document.getElementById("socialCopyNote").textContent = "Facebook, Instagram और YouTube copy बन रही है…";
+    try {
+      const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/generate-social-copy", {
+        method: "POST"
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Social copy generate नहीं हुई।");
+      activeJob = result.job;
+      writePlatformCopyToFields(result.platformCopy);
+      await loadJobs();
+      document.getElementById("socialCopyNote").textContent = "तीनों platforms की copy generate और save हो गई। जरूरत हो तो edit करके Save करें।";
+    } catch (error) {
+      document.getElementById("socialCopyNote").textContent = error.message || "Social copy generate नहीं हुई।";
+    } finally {
+      button.disabled = !activeScriptData;
+      button.textContent = "Generate Captions & Titles";
+    }
+  }
+
+  async function saveSocialCopy() {
+    if (!activeJobId || !activeScriptData) return;
+    const button = document.getElementById("saveSocialCopyBtn");
+    button.disabled = true;
+    try {
+      const platformCopy = readPlatformCopyFromFields();
+      const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platformCopy })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Social copy save नहीं हुई।");
+      activeJob = result;
+      await loadJobs();
+      document.getElementById("socialCopyNote").textContent = "Edited social copy इस Job में save हो गई।";
+    } catch (error) {
+      document.getElementById("socialCopyNote").textContent = error.message || "Social copy save नहीं हुई।";
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function setBufferStatus(message, connected = false, isError = false) {
+    const badge = document.getElementById("bufferConnectionStatus");
+    badge.textContent = message;
+    badge.classList.toggle("connected", connected);
+    const result = document.getElementById("bufferResult");
+    result.classList.toggle("error", isError);
+  }
+
+  async function refreshBufferChannels() {
+    const button = document.getElementById("refreshBufferChannelsBtn");
+    const select = document.getElementById("bufferChannelSelect");
+    button.disabled = true;
+    button.textContent = "Checking Buffer…";
+    setBufferStatus("Connecting…");
+    try {
+      const response = await fetch("/api/buffer/status");
+      const result = await response.json();
+      if (!response.ok || !result.connected) {
+        select.innerHTML = '<option value="">Buffer API not configured</option>';
+        select.disabled = true;
+        document.getElementById("sendToBufferBtn").disabled = true;
+        const message = result.message || result.error || "Buffer connection failed.";
+        setBufferStatus(result.configured ? "Connection error" : "API key needed", false, true);
+        document.getElementById("bufferSetupNote").textContent = message;
+        throw new Error(message);
+      }
+
+      const channels = (result.organizations || []).flatMap(org =>
+        (org.channels || []).map(channel => ({ ...channel, organizationName: org.name }))
+      ).filter(channel => ["facebook", "instagram", "youtube"].includes(String(channel.service || "").toLowerCase()));
+
+      select.innerHTML = '<option value="">Select a connected channel…</option>' +
+        channels.map(channel =>
+          '<option value="' + escapeHtml(channel.id) + '">' +
+          escapeHtml(channel.service.toUpperCase() + " · " + channel.name) +
+          '</option>'
+        ).join("");
+      select.disabled = channels.length === 0;
+      document.getElementById("sendToBufferBtn").disabled = channels.length === 0;
+      setBufferStatus(channels.length ? "Connected · " + channels.length + " channels" : "No supported channels", channels.length > 0);
+      document.getElementById("bufferSetupNote").textContent = channels.length
+        ? "Connected to Buffer. Select the channel, paste a public video URL, then add it to the Queue."
+        : "Buffer connected, but no Facebook, Instagram or YouTube channel was found in this organization.";
+      document.getElementById("bufferResult").textContent = "";
+    } catch (error) {
+      setBufferStatus("Not connected", false, true);
+      if (error.message) document.getElementById("bufferSetupNote").textContent = error.message;
+    } finally {
+      button.disabled = false;
+      button.textContent = "Connect / Refresh Buffer";
+    }
+  }
+
+  async function sendVideoToBuffer() {
+    if (!activeJobId) return;
+    const channelId = document.getElementById("bufferChannelSelect").value;
+    const videoUrl = document.getElementById("bufferVideoUrl").value.trim();
+    const platformCopy = readPlatformCopyFromFields();
+    const resultHost = document.getElementById("bufferResult");
+    const button = document.getElementById("sendToBufferBtn");
+    if (!channelId) {
+      resultHost.textContent = "पहले Buffer channel चुनें।";
+      resultHost.classList.add("error");
+      return;
+    }
+    if (!videoUrl) {
+      resultHost.textContent = "पहले video की public HTTPS URL डालें।";
+      resultHost.classList.add("error");
+      return;
+    }
+    button.disabled = true;
+    button.textContent = "Sending to Buffer…";
+    resultHost.classList.remove("error");
+    resultHost.textContent = "Post Buffer Queue में भेजी जा रही है…";
+    try {
+      const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/buffer/queue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channelId,
+          videoUrl,
+          platformCopy,
+          isAiGenerated: document.getElementById("bufferAiDisclosure").checked
+        })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Buffer Queue में post नहीं जा पाई।");
+      const due = result.post?.dueAt ? " · " + new Date(result.post.dueAt).toLocaleString("en-IN") : "";
+      resultHost.textContent = "Added to " + result.channelName + " Buffer Queue" + due + ".";
+      resultHost.classList.remove("error");
+    } catch (error) {
+      resultHost.textContent = error.message || "Buffer में post नहीं जा पाई।";
+      resultHost.classList.add("error");
+    } finally {
+      button.disabled = !document.getElementById("bufferChannelSelect").value;
+      button.textContent = "Add Video to Buffer Queue";
+    }
+  }
+
   function displayScript(job) {
     activeJob = job;
     activeScriptData = job.scriptData || null;
@@ -1021,6 +1212,7 @@
     document.getElementById("scriptHook").value = activeScriptData?.hook || "";
     document.getElementById("voiceoverText").value = activeScriptData?.voiceover || job.script || "";
     document.getElementById("scriptCta").value = activeScriptData?.cta || "";
+    writePlatformCopyToFields(job.platformCopy);
     renderSceneImageGallery(job.sceneImages || []);
     document.getElementById("generateImagesBtn").disabled = !imageGenerationEnabled || !activeScriptData;
     document.getElementById("generateImagesBtn").textContent = imageGenerationEnabled ? "Generate / Refresh AI Scene Images (Paid)" : "AI Scene Images · OFF";
@@ -1041,6 +1233,7 @@
   }
 
   async function openScriptStudio(jobId) {
+    refreshBufferChannels();
     activeJobId = jobId;
     activeJob = jobs.find(job => job.id === jobId) || null;
     if (!activeJob) return;
@@ -1593,6 +1786,14 @@
   scriptDialog.addEventListener("click", event => {
     if (event.target === scriptDialog) scriptDialog.close();
   });
+  document.getElementById("generateSocialCopyBtn").addEventListener("click", generateSocialCopy);
+  document.getElementById("saveSocialCopyBtn").addEventListener("click", saveSocialCopy);
+  document.getElementById("copyFacebookCaptionBtn").addEventListener("click", () => copySocialField("facebookCaption", "Facebook caption"));
+  document.getElementById("copyInstagramCaptionBtn").addEventListener("click", () => copySocialField("instagramCaption", "Instagram caption"));
+  document.getElementById("copyYoutubeTitleBtn").addEventListener("click", () => copySocialField("youtubeTitle", "YouTube title"));
+  document.getElementById("copyYoutubeDescriptionBtn").addEventListener("click", () => copySocialField("youtubeDescription", "YouTube description"));
+  document.getElementById("refreshBufferChannelsBtn").addEventListener("click", refreshBufferChannels);
+  document.getElementById("sendToBufferBtn").addEventListener("click", sendVideoToBuffer);
   document.getElementById("generateScriptBtn").addEventListener("click", () => generateScript(false));
   document.getElementById("convertScriptBtn").addEventListener("click", convertCurrentScriptToDevanagari);
   document.getElementById("saveScriptBtn").addEventListener("click", saveScriptEdits);
