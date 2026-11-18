@@ -21,6 +21,16 @@ jobs:
         run: npm install --ignore-scripts
       - name: Check server JavaScript syntax
         run: node --check src/server.js
+      - name: Check dashboard inline JavaScript syntax
+        run: |
+          node --input-type=module -e '
+            import { readFileSync, writeFileSync } from "node:fs";
+            const html = readFileSync("public/index.html", "utf8");
+            const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+            if (!scripts.length) throw new Error("Dashboard inline script not found");
+            writeFileSync("/tmp/antardrishti-dashboard.js", scripts.at(-1)[1]);
+          '
+          node --check /tmp/antardrishti-dashboard.js
       - name: Run job-store regression tests
         run: npm test
       - name: Verify package metadata
