@@ -160,9 +160,35 @@
     .scene-image-card img { display:block; width:100%; aspect-ratio:9/16; object-fit:cover; border-radius:6px; background:#0c1522; }
     .scene-image-card small { display:block; margin-top:7px; color:#aab9cb; font-size:10px; }
     .scene-image-note { margin:8px 0; color:#d5ad70; font-size:10px; line-height:1.55; }
-    .video-result video { width:min(260px,100%); display:block; margin:0 auto 10px; background:#000; border-radius:8px; }
+    .video-preview-wrap { position:relative; width:min(260px,100%); aspect-ratio:9/16; margin:0 auto 10px; background:#000; border-radius:8px; overflow:hidden; }
+    .video-preview-wrap video { width:100%; height:100%; display:block; object-fit:contain; background:#000; }
+    .reels-safe-overlay { position:absolute; inset:0; pointer-events:none; color:#fff; font:600 8px Arial,sans-serif; letter-spacing:.3px; text-shadow:0 1px 3px #000; }
+    .reels-safe-outline { position:absolute; left:8%; right:17%; top:13%; bottom:20%; border:1px dashed #ffe08a; box-shadow:0 0 0 999px #0002; }
+    .reels-safe-top, .reels-safe-bottom, .reels-safe-right { position:absolute; display:grid; place-items:center; background:#07111d88; }
+    .reels-safe-top { inset:0 0 auto; height:13%; }
+    .reels-safe-bottom { inset:auto 0 0; height:20%; }
+    .reels-safe-right { top:13%; right:0; bottom:20%; width:17%; writing-mode:vertical-rl; }
+    .safe-area-toggle { display:flex; align-items:center; justify-content:center; gap:8px; margin:0 auto 10px; color:#b9c6d8; font-size:10px; }
+    .safe-area-toggle input { width:auto; min-height:0; }
     @media (max-width: 700px) { .scene-image-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
     .video-result a { display:block; text-align:center; color:#e6c78e; font-size:12px; text-decoration:underline; }
+    .social-pack, .buffer-publish-panel { margin-top:18px; padding:15px; border:1px solid var(--line); border-radius:10px; background:#121d2d; }
+    .social-pack-head, .buffer-panel-head { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:10px; }
+    .social-pack-head h2, .buffer-panel-head h2 { margin:0; font-family:Georgia, "Times New Roman", serif; font-size:18px; font-weight:500; }
+    .social-copy-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:12px; }
+    .social-copy-card { min-width:0; padding:12px; background:#19273a; border:1px solid #30435d; border-radius:9px; }
+    .social-copy-card h3 { margin:0 0 8px; color:#e6c78e; font-size:12px; }
+    .social-copy-card textarea { width:100%; min-height:145px; resize:vertical; padding:10px; color:var(--text); background:#0f1928; border:1px solid #34465e; border-radius:7px; font:inherit; font-size:11px; line-height:1.55; }
+    .social-copy-card .title-input { margin-bottom:8px; }
+    .social-copy-actions { display:flex; flex-wrap:wrap; gap:7px; margin-top:8px; }
+    .social-copy-note, .buffer-help { margin:7px 0; color:#9eafc4; font-size:10px; line-height:1.55; }
+    .buffer-grid { display:grid; grid-template-columns:1fr 1fr; gap:11px; align-items:end; margin-top:12px; }
+    .buffer-grid .wide { grid-column:1/-1; }
+    .buffer-status-pill { color:#a9b9cb; border:1px solid #40536c; border-radius:20px; padding:5px 9px; font-size:10px; }
+    .buffer-status-pill.connected { color:var(--green); border-color:#376b57; }
+    .buffer-result { min-height:18px; margin:9px 0 0; color:var(--green); font-size:11px; }
+    .buffer-result.error { color:var(--red); }
+    .buffer-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
     .privacy-note { color:#8091a7; font-size:10px; line-height:1.55; margin-top:8px; }
     .empty { padding: 35px 20px; text-align: center; color: var(--muted); font-size: 12px; }
     .footer-note { margin: 15px 2px 0; color: #75869b; font-size: 10px; line-height: 1.7; }
@@ -197,6 +223,8 @@
       .queue-tools input { flex: 1; width: 1px; }
       .queue-tools select { width: 135px; }
       .modal-grid, .script-scenes { grid-template-columns:1fr; }
+      .social-copy-grid, .buffer-grid { grid-template-columns:1fr; }
+      .buffer-grid .wide { grid-column:auto; }
       .modal-body { padding:15px; }
     }
     @media (max-width: 420px) {
@@ -309,23 +337,6 @@
           </div>
         </section>
       </div>
-
-      <section class="panel" style="margin-top:18px">
-        <div class="panel-heading">
-          <h2>Buffer connection</h2>
-          <span class="panel-kicker">API STATUS</span>
-        </div>
-        <p class="panel-kicker" style="text-transform:none;line-height:1.6">
-          Check your Buffer API key and view the connected social channels. This check does not publish anything.
-        </p>
-        <div class="modal-actions">
-          <button class="secondary-btn" id="checkBufferBtn" type="button">Check Buffer connection</button>
-        </div>
-        <p id="bufferStatus" role="status" style="margin:12px 0 8px;color:#5d6d80">
-          Buffer connection अभी check नहीं हुई है।
-        </p>
-        <div id="bufferChannels" aria-live="polite"></div>
-      </section>
     </section>
 
     <section class="panel create-panel" id="create">
@@ -350,9 +361,10 @@
           <div>
             <label for="duration">DURATION</label>
             <select id="duration" name="duration">
+              <option value="15">15 seconds · Short</option>
               <option value="30">30 seconds</option>
               <option value="45" selected>45 seconds</option>
-              <option value="60">60 seconds</option>
+              <option value="60">60 seconds · Long</option>
             </select>
           </div>
           <button class="primary-btn" type="submit">＋ Add to queue</button>
@@ -462,10 +474,10 @@
             <p class="brand-logo-note" id="brandLogoNote">PNG with transparent background works best. Upload once; it will be saved locally and added to every generated video.</p>
           </div>
         </div>
-        <div class="panel-heading"><h2>Scene visuals</h2><span class="panel-kicker">AI IMAGE · 9:16</span></div>
+        <div class="panel-heading"><h2>Scene visuals</h2><span class="panel-kicker">AI SHOTS · 9:16</span></div>
         <p class="scene-image-note" id="imageGenerationNote">Cloudflare Workers AI free image API configure करने के बाद यहाँ से image generation चालू होगी।</p>
         <div class="modal-actions">
-          <button class="secondary-btn" id="generateImagesBtn" type="button" disabled>Generate Scene Images (Free API)</button>
+          <button class="secondary-btn" id="generateImagesBtn" type="button" disabled>Generate Missing AI Images (Free API)</button>
         </div>
         <div id="sceneImageGallery" class="scene-image-grid"></div>
         <div class="panel-heading"><h2>Scene-by-scene slide plan</h2><span class="panel-kicker">9:16 VERTICAL</span></div>
@@ -480,17 +492,97 @@
           <button class="secondary-btn" id="renderVideoBtn" type="button">Create Slide Video</button>
           <button class="primary-btn" id="autoCreateVideoBtn" type="button" disabled>Auto Create Video (Free APIs)</button>
         </div>
+        <section class="social-pack" aria-labelledby="socialPackTitle">
+          <div class="social-pack-head">
+            <h2 id="socialPackTitle">Social Media Content Pack</h2>
+            <button class="secondary-btn" id="generateSocialCopyBtn" type="button" disabled>Generate Captions & Titles</button>
+          </div>
+          <p class="social-copy-note">एक ही video script से platform के हिसाब से अलग copy बनेगी। Text edit करके Save करें या Copy करें। Hashtags English lowercase में रहेंगे।</p>
+          <div class="social-copy-grid">
+            <article class="social-copy-card">
+              <h3>Facebook · Caption</h3>
+              <textarea id="facebookCaption" maxlength="5000" placeholder="Facebook caption यहाँ बनेगा…"></textarea>
+              <div class="social-copy-actions">
+                <button class="secondary-btn" type="button" id="copyFacebookCaptionBtn">Copy Facebook</button>
+              </div>
+            </article>
+            <article class="social-copy-card">
+              <h3>Instagram · Reel Caption</h3>
+              <textarea id="instagramCaption" maxlength="5000" placeholder="Instagram Reel caption यहाँ बनेगा…"></textarea>
+              <div class="social-copy-actions">
+                <button class="secondary-btn" type="button" id="copyInstagramCaptionBtn">Copy Instagram</button>
+              </div>
+            </article>
+            <article class="social-copy-card">
+              <h3>YouTube Shorts</h3>
+              <label for="youtubeTitle">VIDEO TITLE · MAX 100 CHARACTERS</label>
+              <input class="title-input" id="youtubeTitle" maxlength="100" placeholder="YouTube title…">
+              <label for="youtubeDescription">DESCRIPTION</label>
+              <textarea id="youtubeDescription" maxlength="5000" placeholder="YouTube description और hashtags…"></textarea>
+              <div class="social-copy-actions">
+                <button class="secondary-btn" type="button" id="copyYoutubeTitleBtn">Copy Title</button>
+                <button class="secondary-btn" type="button" id="copyYoutubeDescriptionBtn">Copy Description</button>
+              </div>
+            </article>
+          </div>
+          <div class="modal-actions">
+            <button class="secondary-btn" id="saveSocialCopyBtn" type="button">Save Social Copy</button>
+            <span class="panel-kicker" id="socialCopyNote">Social copy अभी generate नहीं हुई है।</span>
+          </div>
+        </section>
+
+        <section class="buffer-publish-panel" aria-labelledby="bufferPublishTitle">
+          <div class="buffer-panel-head">
+            <h2 id="bufferPublishTitle">Buffer Publishing</h2>
+            <span class="buffer-status-pill" id="bufferConnectionStatus">Not connected</span>
+          </div>
+          <p class="buffer-help">यहाँ से चुने हुए Facebook Reel, Instagram Reel या YouTube channel की Buffer Queue में video post भेजें। इसके लिए Buffer API key और public HTTPS video URL चाहिए।</p>
+          <div class="buffer-grid">
+            <div>
+              <label for="bufferChannelSelect">BUFFER CHANNEL</label>
+              <select id="bufferChannelSelect" disabled>
+                <option value="">Connect Buffer first…</option>
+              </select>
+            </div>
+            <div>
+              <label for="bufferVideoUrl">PUBLIC VIDEO URL · HTTPS</label>
+              <input id="bufferVideoUrl" type="url" placeholder="https://your-public-host/video.mp4">
+            </div>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-weight:500">
+            <input id="bufferAiDisclosure" type="checkbox" checked style="width:auto;min-height:0">
+            Mark this post as AI-generated where the channel supports disclosure
+          </label>
+          <div class="buffer-actions">
+            <button class="secondary-btn" id="refreshBufferChannelsBtn" type="button">Connect / Refresh Buffer</button>
+            <button class="primary-btn" id="sendToBufferBtn" type="button" disabled>Add Video to Buffer Queue</button>
+          </div>
+          <p class="buffer-help" id="bufferSetupNote">Buffer API key को project की local .env file में BUFFER_API_KEY= के बाद रखें। API key chat या GitHub में share न करें।</p>
+          <p class="buffer-help" id="bufferApprovalNote">Publishing तभी खुलेगी जब dashboard में इस video का status Approved होगा।</p>
+          <div class="buffer-help" id="bufferQueueHistory" aria-live="polite">इस video के लिए अभी Buffer Queue history नहीं है।</div>
+          <p class="buffer-result" id="bufferResult" role="status"></p>
+        </section>
+
         <p class="modal-status" id="studioStatus" role="status"></p>
         <audio id="voicePlayer" class="voice-player" controls hidden></audio>
         <div class="video-result" id="videoResult">
-          <video id="videoPreview" controls playsinline></video>
+          <label class="safe-area-toggle"><input id="reelsSafeAreaToggle" type="checkbox"> Preview Instagram Reels safe area</label>
+          <div class="video-preview-wrap">
+            <video id="videoPreview" controls playsinline></video>
+            <div class="reels-safe-overlay" id="reelsSafeAreaOverlay" hidden aria-hidden="true">
+              <div class="reels-safe-top">TOP UI AREA</div>
+              <div class="reels-safe-outline"></div>
+              <div class="reels-safe-right">REELS CONTROLS</div>
+              <div class="reels-safe-bottom">CAPTION / ACTION UI AREA</div>
+            </div>
+          </div>
           <a id="videoDownload" href="#" download>Download video</a>
           <a id="subtitleDownload" href="#" download>Download Hindi subtitles (.srt)</a>
         </div>
         <p class="privacy-note">Free-tier AI requests are sent to Google. Do not include client names, private therapy notes or other sensitive personal information. Generated scripts need your review before publication.</p>
       </div>
     </dialog>
-    <p class="footer-note">यह dashboard अभी video briefs और production status manage करता है। Actual AI script, presenter, voice, cinematic clips, subtitles और MP4 rendering अगले development चरण में जोड़े जाएँगे। Final publishing से पहले आपकी approval रहेगी।</p>
+    <p class="footer-note">यह dashboard video briefs और production status manage करता है। Script Studio में Hindi script, voice, scene images, subtitles और browser-based video rendering उपलब्ध हैं। Buffer Queue में post भेजने से पहले dashboard में status Approved होना जरूरी है।</p>
   </main>
 </div>
 
@@ -500,42 +592,7 @@
   const messageEl = document.getElementById("message");
   const searchInput = document.getElementById("searchInput");
   const filterStatus = document.getElementById("filterStatus");
-  const checkBufferBtn = document.getElementById("checkBufferBtn");
-  const bufferStatus = document.getElementById("bufferStatus");
-  const bufferChannels = document.getElementById("bufferChannels");
   let jobs = [];
-
-  async function checkBufferConnection() {
-    checkBufferBtn.disabled = true;
-    bufferStatus.textContent = "Buffer account जाँचा जा रहा है…";
-    bufferChannels.innerHTML = "";
-    try {
-      const response = await fetch("/api/buffer/status");
-      const data = await response.json();
-      if (!response.ok || !data.connected) {
-        bufferStatus.textContent = data.error || data.message || "Buffer connection verify नहीं हो पाई।";
-        return;
-      }
-
-      const channels = Array.isArray(data.channels) ? data.channels : [];
-      bufferStatus.textContent = "Buffer connected. " +
-        (data.organizations?.length || 0) + " organization(s), " + channels.length + " channel(s) मिले।";
-      bufferChannels.innerHTML = channels.length
-        ? '<ul style="margin:8px 0 0;padding-left:20px">' + channels.map(channel => {
-            const state = channel.isDisconnected ? " · disconnected" :
-              channel.isQueuePaused ? " · queue paused" : " · ready";
-            return '<li>' + escapeHtml(channel.name) + ' — ' +
-              escapeHtml(channel.service) + escapeHtml(state) + '</li>';
-          }).join("") + '</ul>'
-        : "<p>इस Buffer account में कोई connected channel नहीं मिला।</p>";
-    } catch (error) {
-      bufferStatus.textContent = error.message || "Buffer connection check नहीं हो पाया।";
-    } finally {
-      checkBufferBtn.disabled = false;
-    }
-  }
-
-  checkBufferBtn.addEventListener("click", checkBufferConnection);
 
   const statusOptions = [
     ["brief_created", "Brief created"],
@@ -657,6 +714,8 @@
         <strong>Scene ${index + 1} · ${escapeHtml(scene.duration_sec || 0)} sec</strong>
         <p><b>Dialogue:</b> ${escapeHtml(scene.dialogue || "")}</p>
         <p><b>Visual:</b> ${escapeHtml(scene.visual_direction || "")}</p>
+        <p><b>Shot:</b> ${escapeHtml(scene.shot_type || "Not specified")} · <b>Camera:</b> ${escapeHtml(scene.camera_movement || "Not specified")}</p>
+        <p><b>Transition:</b> ${escapeHtml(scene.transition || "Not specified")} · <b>Audio:</b> ${escapeHtml(scene.audio_cue || "Not specified")}</p>
         <small>Subtitle: ${escapeHtml(scene.subtitle || "")}</small>
       </article>`).join("");
   }
@@ -665,8 +724,8 @@
     if (!brandLogoImage || !brandLogoImage.complete ||
         !brandLogoImage.naturalWidth || !brandLogoImage.naturalHeight) return;
 
-    const maxWidth = 148;
-    const maxHeight = 92;
+    const maxWidth = 200;
+    const maxHeight = 100;
     const scale = Math.min(
       maxWidth / brandLogoImage.naturalWidth,
       maxHeight / brandLogoImage.naturalHeight,
@@ -674,8 +733,8 @@
     );
     const drawWidth = brandLogoImage.naturalWidth * scale;
     const drawHeight = brandLogoImage.naturalHeight * scale;
-    const x = canvasWidth - 78 - drawWidth;
-    const y = 56 + (maxHeight - drawHeight) / 2;
+    const x = canvasWidth - 190 - drawWidth;
+    const y = 260 + (maxHeight - drawHeight) / 2;
 
     context.save();
     context.globalAlpha = 0.96;
@@ -796,21 +855,124 @@
     }
   }
 
+  function getActiveVisualPlan() {
+    if (activeJob?.visualPlan?.scenes?.length) return activeJob.visualPlan;
+    const specs = {
+      15: { totalShots: 5, totalImages: 4 },
+      30: { totalShots: 8, totalImages: 6 },
+      45: { totalShots: 10, totalImages: 8 },
+      60: { totalShots: 13, totalImages: 10 }
+    };
+    const duration = Number(activeJob?.duration || 45);
+    const spec = specs[duration] || specs[45];
+    const sceneCount = Math.max(1, Math.min(6, activeScriptData?.scenes?.length || 3));
+    const distribute = total => {
+      const base = Math.floor(total / sceneCount);
+      const remainder = total % sceneCount;
+      return Array.from({ length: sceneCount }, (_, index) => base + (index < remainder ? 1 : 0));
+    };
+    const shots = distribute(spec.totalShots);
+    const images = distribute(spec.totalImages);
+    return {
+      duration,
+      totalShots: spec.totalShots,
+      totalImages: spec.totalImages,
+      scenes: shots.map((shotCount, sceneIndex) => ({
+        sceneIndex, shotCount, imageCount: images[sceneIndex]
+      }))
+    };
+  }
+
+  function getPlannedImageTargets() {
+    return getActiveVisualPlan().scenes.flatMap(scene =>
+      Array.from({ length: scene.imageCount }, (_, variantIndex) => ({
+        sceneIndex: scene.sceneIndex,
+        variantIndex
+      }))
+    );
+  }
+
+  function getImageTargetKey(sceneIndex, variantIndex) {
+    return Number(sceneIndex) + ":" + Number(variantIndex || 0);
+  }
+
+  function updateImageGenerationControls() {
+    const button = document.getElementById("generateImagesBtn");
+    if (!button) return;
+    const plan = getActiveVisualPlan();
+    const existing = Array.isArray(activeJob?.sceneImages) ? activeJob.sceneImages : [];
+    const existingKeys = new Set(existing.map(item =>
+      getImageTargetKey(item.sceneIndex, Number.isInteger(Number(item.variantIndex)) ? Number(item.variantIndex) : 0)
+    ));
+    const missing = getPlannedImageTargets().filter(target =>
+      !existingKeys.has(getImageTargetKey(target.sceneIndex, target.variantIndex))
+    ).length;
+    const note = document.getElementById("imageGenerationNote");
+    if (note) {
+      const baseNote = note.dataset.baseText || note.textContent;
+      note.dataset.baseText = baseNote.replace(/ Video plan:.*$/, "");
+      note.textContent = activeScriptData
+        ? note.dataset.baseText + " Video plan: " + plan.totalShots + " visual shots using " +
+          plan.totalImages + " AI images. Ready: " + (plan.totalImages - missing) + "; missing: " + missing + "."
+        : note.dataset.baseText;
+    }
+    button.disabled = !imageGenerationEnabled || !activeScriptData || missing === 0;
+    button.textContent = !imageGenerationEnabled
+      ? "Scene Images · Not configured"
+      : missing > 0
+        ? "Generate " + missing + " Missing AI Images"
+        : "All " + plan.totalImages + " AI Images Ready";
+  }
+
   function renderSceneImageGallery(images = []) {
     const gallery = document.getElementById("sceneImageGallery");
     gallery.replaceChildren();
-    const sorted = [...images].sort((a, b) => a.sceneIndex - b.sceneIndex);
+    const sorted = [...images].sort((a, b) =>
+      Number(a.sceneIndex) - Number(b.sceneIndex) ||
+      (Number(a.variantIndex) || 0) - (Number(b.variantIndex) || 0)
+    );
     for (const item of sorted) {
+      const sceneIndex = Number(item.sceneIndex);
+      const variantIndex = Number.isInteger(Number(item.variantIndex)) ? Number(item.variantIndex) : 0;
       const card = document.createElement("div");
       card.className = "scene-image-card";
       const image = document.createElement("img");
       image.loading = "lazy";
-      image.alt = "Generated visual for scene " + (Number(item.sceneIndex) + 1);
+      image.alt = "Generated visual for scene " + (sceneIndex + 1) + ", image " + (variantIndex + 1);
       image.src = item.url + "?v=" + encodeURIComponent(item.generatedAt || "");
       const label = document.createElement("small");
-      label.textContent = "Scene " + (Number(item.sceneIndex) + 1) + " · AI generated";
-      card.append(image, label);
+      label.textContent = "Scene " + (sceneIndex + 1) + " · Visual " + (variantIndex + 1) + " · AI generated";
+      const regenerate = document.createElement("button");
+      regenerate.type = "button";
+      regenerate.className = "secondary-btn regenerate-scene-image";
+      regenerate.textContent = "Regenerate this image";
+      regenerate.addEventListener("click", () => regenerateSceneImage(sceneIndex, variantIndex, regenerate));
+      card.append(image, label, regenerate);
       gallery.append(card);
+    }
+  }
+
+  async function regenerateSceneImage(sceneIndex, variantIndex, button) {
+    if (!activeJobId || !imageGenerationEnabled) return;
+    if (!window.confirm("केवल Scene " + (sceneIndex + 1) + " की यह एक image दोबारा बनेगी। Daily free quota से 1 image इस्तेमाल होगी। आगे बढ़ें?")) return;
+    button.disabled = true;
+    button.textContent = "Regenerating…";
+    try {
+      const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/generate-scene-images", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sceneIndex, variantIndex, force: true })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Image regenerate नहीं हुई।");
+      activeJob = result.job;
+      await loadJobs();
+      displayScript(activeJob);
+      setStudioStatus("Scene " + (sceneIndex + 1) + " की selected image regenerate हो गई। बाकी images और Hindi voice सुरक्षित हैं।");
+    } catch (error) {
+      setStudioStatus(error.message || "Image regenerate नहीं हुई।", true);
+      button.disabled = false;
+      button.textContent = "Retry image";
     }
   }
 
@@ -822,14 +984,17 @@
       const health = await response.json();
       imageGenerationEnabled = response.ok && health.imageGenerationEnabled === true;
       if (imageGenerationEnabled) {
-        note.textContent = "Cloudflare Workers AI free allocation · 10,000 Neurons/day shared quota. Studio hard cap: " +
-          (health.imageDailyLimit || 150) + " images/day. Quota खत्म होने पर request रुक जाएगी; paid fallback नहीं होगा.";
+        note.textContent = "Cloudflare का 10,000 Neurons/day free allocation पूरे account में shared है। Studio safety cap: " +
+          (health.imageDailyLimit || 30) + " images/day (Cloudflare की असली Neuron limit से अलग)। इस्तेमाल: " +
+          (health.imageUsageToday || 0) + " · Studio में शेष: " + (health.imageImagesRemaining ?? 0) +
+          ". Paid fallback नहीं होगा।";
+        note.dataset.baseText = note.textContent;
       } else {
         note.textContent = "Cloudflare free image API configure नहीं है। local .env में Account ID, API Token और CLOUDFLARE_IMAGE_ENABLED=true सेट करें। अभी कोई image request नहीं भेजी जाएगी।";
       }
-      button.disabled = !imageGenerationEnabled || !activeScriptData;
-      button.textContent = imageGenerationEnabled ? "Generate / Refresh Scene Images (Free API)" : "Scene Images · Not configured";
+      updateImageGenerationControls();
       document.getElementById("autoCreateVideoBtn").disabled = !imageGenerationEnabled || !activeScriptData;
+      document.getElementById("generateSocialCopyBtn").disabled = !activeScriptData;
     } catch {
       imageGenerationEnabled = false;
       note.textContent = "Image API status check नहीं हो पाया। Free API configure होने तक generation बंद रहेगी।";
@@ -845,35 +1010,55 @@
       setStudioStatus("Cloudflare free image API अभी configure नहीं है। .env settings जोड़कर server restart करें।", true);
       return;
     }
+
+    const targets = getPlannedImageTargets();
     const existing = Array.isArray(activeJob?.sceneImages) ? activeJob.sceneImages : [];
-    const expected = (activeScriptData.scenes || []).length;
-    const force = existing.length >= expected && expected > 0;
-    const warning = force
-      ? "मौजूदा scene images को Cloudflare Workers AI free daily quota से दोबारा generate करेंगे। Studio limit 100 images/day है। आगे बढ़ें?"
-      : "यह up to " + Math.max(0, expected - existing.length) + " scene images Cloudflare Workers AI free allocation से बनाएगा। Quota shared है; limit पूरी होने पर paid fallback नहीं होगा। आगे बढ़ें?";
-    if (!window.confirm(warning)) return;
+    const existingKeys = new Set(existing.map(item =>
+      getImageTargetKey(item.sceneIndex, Number.isInteger(Number(item.variantIndex)) ? Number(item.variantIndex) : 0)
+    ));
+    const missing = targets.filter(target =>
+      !existingKeys.has(getImageTargetKey(target.sceneIndex, target.variantIndex))
+    );
+    if (!missing.length) {
+      setStudioStatus("सभी " + targets.length + " planned AI images पहले से उपलब्ध हैं। किसी एक image को बदलने के लिए उसके नीचे Regenerate this image दबाएँ।");
+      updateImageGenerationControls();
+      return;
+    }
+
+    const approved = window.confirm(
+      "इस " + activeJob.duration + " सेकंड के video के लिए " + missing.length +
+      " missing AI images बनेंगी। कुल योजना: " + getActiveVisualPlan().totalShots +
+      " visual shots, " + getActiveVisualPlan().totalImages +
+      " AI images। मौजूदा images reuse होंगी। Studio safety cap 30 images/day है; कोई paid fallback नहीं। आगे बढ़ें?"
+    );
+    if (!approved) return;
 
     const button = document.getElementById("generateImagesBtn");
     button.disabled = true;
-    button.textContent = "Generating images…";
-    setStudioStatus("Cloudflare FLUX हर scene के लिए image बना रहा है…");
+    button.textContent = "Generating " + missing.length + " images…";
+    setStudioStatus("Cloudflare FLUX केवल missing images बना रहा है; पुरानी images और voice सुरक्षित रहेंगी…");
     try {
       const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/generate-scene-images", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ force })
+        body: JSON.stringify({ force: false })
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Scene images generate नहीं हो पाईं।");
       activeJob = result.job;
       await loadJobs();
       displayScript(activeJob);
-      setStudioStatus((result.sceneImages || []).length + " scene images तैयार हैं। अब Create Slide Video दबाएँ।");
+      setStudioStatus(
+        (result.generatedImages || 0) + " नई AI images बन गईं। " +
+        getActiveVisualPlan().totalShots + " visual shots तैयार होंगे। अब Create Slide Video दबाएँ।"
+      );
     } catch (error) {
       setStudioStatus(error.message || "Scene images generate नहीं हो पाईं।", true);
+      const latest = await fetch("/api/jobs").then(response => response.json()).catch(() => []);
+      activeJob = latest.find(item => item.id === activeJobId) || activeJob;
+      displayScript(activeJob);
     } finally {
-      button.disabled = !imageGenerationEnabled;
-      button.textContent = imageGenerationEnabled ? "Generate / Refresh Scene Images (Free API)" : "Scene Images · Not configured";
+      updateImageGenerationControls();
     }
   }
 
@@ -938,13 +1123,31 @@
       if (!voiceResponse.ok) throw new Error(voiceResult.error || "Hindi voice generate नहीं हुई।");
       activeJob.voiceFile = voiceResult.voiceFile;
       activeJob.voiceModeLabel = voiceResult.voiceModeLabel;
+      activeJob.voiceDurationSec = voiceResult.audioDurationSec;
+      const targetVoiceDuration = Number(activeJob.duration || 45);
+      const actualVoiceDuration = Number(voiceResult.audioDurationSec);
+      if (!Number.isFinite(actualVoiceDuration) || actualVoiceDuration <= 0) {
+        throw new Error("Voiceover की वास्तविक अवधि नहीं मिल पाई। Generate Hindi Voice दोबारा करें।");
+      }
+      setStudioStatus(
+        "Voice तैयार है: " + actualVoiceDuration.toFixed(1) +
+        " sec। " + targetVoiceDuration + " sec चुना गया था; final video actual voice duration के अनुसार render होगी।"
+      );
 
       const currentImages = Array.isArray(activeJob.sceneImages) ? activeJob.sceneImages : [];
-      const expectedCount = (activeScriptData.scenes || []).length;
-      if (currentImages.length < expectedCount) {
+      const plannedTargets = getPlannedImageTargets();
+      const currentKeys = new Set(currentImages.map(item =>
+        getImageTargetKey(item.sceneIndex, Number.isInteger(Number(item.variantIndex)) ? Number(item.variantIndex) : 0)
+      ));
+      const missingImageCount = plannedTargets.filter(target =>
+        !currentKeys.has(getImageTargetKey(target.sceneIndex, target.variantIndex))
+      ).length;
+      if (missingImageCount > 0) {
+        const visualPlan = getActiveVisualPlan();
         const approved = window.confirm(
-          "अब up to " + (expectedCount - currentImages.length) +
-          " scene images Cloudflare Workers AI free daily allocation से बनेंगी। Studio hard cap 100 images/day है। Paid fallback नहीं है। Continue?"
+          "अब " + missingImageCount + " missing AI images Cloudflare Workers AI free allocation से बनेंगी। " +
+          visualPlan.totalShots + " visual shots के लिए कुल " + visualPlan.totalImages +
+          " images plan हैं। Studio safety cap 30 images/day है। Paid fallback नहीं है। Continue?"
         );
         if (!approved) throw new Error("Scene image generation आपने रोक दी। Script और voice save हैं; आप बाद में जारी रख सकते हैं।");
 
@@ -975,17 +1178,268 @@
     }
   }
 
+  function readPlatformCopyFromFields() {
+    return {
+      facebookCaption: document.getElementById("facebookCaption").value.trim(),
+      instagramCaption: document.getElementById("instagramCaption").value.trim(),
+      youtubeTitle: document.getElementById("youtubeTitle").value.trim(),
+      youtubeDescription: document.getElementById("youtubeDescription").value.trim()
+    };
+  }
+
+  function writePlatformCopyToFields(copy) {
+    const data = copy && typeof copy === "object" ? copy : {};
+    document.getElementById("facebookCaption").value = data.facebookCaption || "";
+    document.getElementById("instagramCaption").value = data.instagramCaption || "";
+    document.getElementById("youtubeTitle").value = data.youtubeTitle || "";
+    document.getElementById("youtubeDescription").value = data.youtubeDescription || "";
+    document.getElementById("socialCopyNote").textContent = data.facebookCaption
+      ? "Saved social copy loaded. You can edit it before copying or scheduling."
+      : "Social copy अभी generate नहीं हुई है।";
+  }
+
+  function renderBufferQueueHistory(job) {
+    const host = document.getElementById("bufferQueueHistory");
+    const entries = Array.isArray(job?.bufferQueuedPosts) ? job.bufferQueuedPosts : [];
+    if (!entries.length) {
+      host.textContent = "इस video के लिए अभी Buffer Queue history नहीं है।";
+      return;
+    }
+    host.innerHTML = "<strong>Buffer Queue history</strong><ul>" + entries.slice().reverse().map(entry => {
+      const platform = String(entry.platform || "").toUpperCase();
+      const channel = escapeHtml(entry.channelName || platform || "Buffer channel");
+      const due = entry.dueAt ? " · " + escapeHtml(new Date(entry.dueAt).toLocaleString("en-IN")) : "";
+      const postId = escapeHtml(entry.postId || "");
+      return "<li>" + escapeHtml(platform) + " · " + channel + due + (postId ? " · Post ID " + postId : "") + "</li>";
+    }).join("") + "</ul>";
+  }
+
+  function refreshBufferPublishControls() {
+    const approved = activeJob?.status === "approved";
+    const savedCopy = isCurrentPlatformCopySaved();
+    const hasChannel = Boolean(document.getElementById("bufferChannelSelect").value);
+    const hasVideoUrl = Boolean(document.getElementById("bufferVideoUrl").value.trim());
+    document.getElementById("sendToBufferBtn").disabled = !(approved && savedCopy && hasChannel && hasVideoUrl);
+    document.getElementById("bufferApprovalNote").textContent = !approved
+      ? "Publishing बंद है। पहले final video और captions जाँचें, फिर dashboard में इस job का status Approved करें।"
+      : !savedCopy
+        ? "Platform copy में unsaved बदलाव हैं। Save Social Copy करें; content बदलने पर job को दोबारा Approved करना होगा।"
+        : "यह video और saved platform copy Approved हैं। सही public HTTPS video URL जाँचकर Queue में भेजें।";
+  }
+
+  function isCurrentPlatformCopySaved() {
+    const current = readPlatformCopyFromFields();
+    const saved = activeJob?.platformCopy || {};
+    return Object.keys(current).every(field =>
+      current[field] === String(saved[field] || "").trim()
+    );
+  }
+
+  async function copySocialField(fieldId, label) {
+    const value = document.getElementById(fieldId).value.trim();
+    if (!value) {
+      document.getElementById("socialCopyNote").textContent = label + " अभी खाली है।";
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+      document.getElementById("socialCopyNote").textContent = label + " copied.";
+    } catch {
+      const helper = document.createElement("textarea");
+      helper.value = value;
+      helper.style.position = "fixed";
+      helper.style.opacity = "0";
+      document.body.append(helper);
+      helper.select();
+      const copied = document.execCommand("copy");
+      helper.remove();
+      document.getElementById("socialCopyNote").textContent = copied
+        ? label + " copied."
+        : "Copy नहीं हो पाया। Text select करके manually copy करें।";
+    }
+  }
+
+  async function generateSocialCopy() {
+    if (!activeJobId || !activeScriptData) return;
+    const button = document.getElementById("generateSocialCopyBtn");
+    button.disabled = true;
+    button.textContent = "Generating…";
+    document.getElementById("socialCopyNote").textContent = "Facebook, Instagram और YouTube copy बन रही है…";
+    try {
+      const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/generate-social-copy", {
+        method: "POST"
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Social copy generate नहीं हुई।");
+      activeJob = result.job;
+      writePlatformCopyToFields(result.platformCopy);
+      renderBufferQueueHistory(activeJob);
+      refreshBufferPublishControls();
+      await loadJobs();
+      document.getElementById("socialCopyNote").textContent = "तीनों platforms की copy generate और save हो गई। जरूरत हो तो edit करके Save करें।";
+    } catch (error) {
+      document.getElementById("socialCopyNote").textContent = error.message || "Social copy generate नहीं हुई।";
+    } finally {
+      button.disabled = !activeScriptData;
+      button.textContent = "Generate Captions & Titles";
+    }
+  }
+
+  async function saveSocialCopy() {
+    if (!activeJobId || !activeScriptData) return;
+    const button = document.getElementById("saveSocialCopyBtn");
+    button.disabled = true;
+    try {
+      const platformCopy = readPlatformCopyFromFields();
+      const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platformCopy })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Social copy save नहीं हुई।");
+      activeJob = result;
+      renderBufferQueueHistory(activeJob);
+      refreshBufferPublishControls();
+      await loadJobs();
+      document.getElementById("socialCopyNote").textContent = "Edited social copy इस Job में save हो गई।";
+    } catch (error) {
+      document.getElementById("socialCopyNote").textContent = error.message || "Social copy save नहीं हुई।";
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function setBufferStatus(message, connected = false, isError = false) {
+    const badge = document.getElementById("bufferConnectionStatus");
+    badge.textContent = message;
+    badge.classList.toggle("connected", connected);
+    const result = document.getElementById("bufferResult");
+    result.classList.toggle("error", isError);
+  }
+
+  async function refreshBufferChannels() {
+    const button = document.getElementById("refreshBufferChannelsBtn");
+    const select = document.getElementById("bufferChannelSelect");
+    button.disabled = true;
+    button.textContent = "Checking Buffer…";
+    setBufferStatus("Connecting…");
+    try {
+      const response = await fetch("/api/buffer/status");
+      const result = await response.json();
+      if (!response.ok || !result.connected) {
+        select.innerHTML = '<option value="">Buffer API not configured</option>';
+        select.disabled = true;
+        document.getElementById("sendToBufferBtn").disabled = true;
+        const message = result.message || result.error || "Buffer connection failed.";
+        setBufferStatus(result.configured ? "Connection error" : "API key needed", false, true);
+        document.getElementById("bufferSetupNote").textContent = message;
+        throw new Error(message);
+      }
+
+      const channels = (result.organizations || []).flatMap(org =>
+        (org.channels || []).map(channel => ({ ...channel, organizationName: org.name }))
+      ).filter(channel => ["facebook", "instagram", "youtube"].includes(String(channel.service || "").toLowerCase()));
+
+      select.innerHTML = '<option value="">Select a connected channel…</option>' +
+        channels.map(channel =>
+          '<option value="' + escapeHtml(channel.id) + '">' +
+          escapeHtml(channel.service.toUpperCase() + " · " + channel.name) +
+          '</option>'
+        ).join("");
+      select.disabled = channels.length === 0;
+      document.getElementById("sendToBufferBtn").disabled = true;
+      setBufferStatus(channels.length ? "Connected · " + channels.length + " channels" : "No supported channels", channels.length > 0);
+      document.getElementById("bufferSetupNote").textContent = channels.length
+        ? "Connected to Buffer. Select the channel, paste a public video URL, then add it to the Queue."
+        : "Buffer connected, but no Facebook, Instagram or YouTube channel was found in this organization.";
+      document.getElementById("bufferResult").textContent = "";
+    } catch (error) {
+      setBufferStatus("Not connected", false, true);
+      if (error.message) document.getElementById("bufferSetupNote").textContent = error.message;
+    } finally {
+      button.disabled = false;
+      button.textContent = "Connect / Refresh Buffer";
+      refreshBufferPublishControls();
+    }
+  }
+
+  async function sendVideoToBuffer() {
+    if (!activeJobId) return;
+    const channelId = document.getElementById("bufferChannelSelect").value;
+    const videoUrl = document.getElementById("bufferVideoUrl").value.trim();
+    const platformCopy = readPlatformCopyFromFields();
+    const resultHost = document.getElementById("bufferResult");
+    const button = document.getElementById("sendToBufferBtn");
+    if (!activeJob || activeJob.status !== "approved") {
+      resultHost.textContent = "पहले final video और captions review करें, फिर dashboard में status Approved करें।";
+      resultHost.classList.add("error");
+      refreshBufferPublishControls();
+      return;
+    }
+    if (!channelId) {
+      resultHost.textContent = "पहले Buffer channel चुनें।";
+      resultHost.classList.add("error");
+      return;
+    }
+    if (!videoUrl) {
+      resultHost.textContent = "पहले video की public HTTPS URL डालें।";
+      resultHost.classList.add("error");
+      return;
+    }
+    if (!isCurrentPlatformCopySaved()) {
+      resultHost.textContent = "Platform copy में unsaved changes हैं। पहले Save Social Copy करें, फिर job को दोबारा Approved करें।";
+      resultHost.classList.add("error");
+      return;
+    }
+    button.disabled = true;
+    button.textContent = "Sending to Buffer…";
+    resultHost.classList.remove("error");
+    resultHost.textContent = "Post Buffer Queue में भेजी जा रही है…";
+    try {
+      const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/buffer/queue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channelId,
+          videoUrl,
+          platformCopy,
+          isAiGenerated: document.getElementById("bufferAiDisclosure").checked
+        })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Buffer Queue में post नहीं जा पाई।");
+      const due = result.post?.dueAt ? " · " + new Date(result.post.dueAt).toLocaleString("en-IN") : "";
+      resultHost.textContent = "Added to " + result.channelName + " Buffer Queue" + due + ".";
+      resultHost.classList.remove("error");
+      if (result.job) {
+        activeJob = result.job;
+        renderBufferQueueHistory(activeJob);
+      }
+      document.getElementById("bufferVideoUrl").value = "";
+      refreshBufferPublishControls();
+    } catch (error) {
+      resultHost.textContent = error.message || "Buffer में post नहीं जा पाई।";
+      resultHost.classList.add("error");
+    } finally {
+      button.textContent = "Add Video to Buffer Queue";
+      refreshBufferPublishControls();
+    }
+  }
+
   function displayScript(job) {
     activeJob = job;
     activeScriptData = job.scriptData || null;
-    document.getElementById("scriptTopicLabel").textContent = job.topic + " · " + job.duration + " sec · Mixed/slide workflow";
+    document.getElementById("scriptTopicLabel").textContent = job.topic + " · " + job.duration + " sec · " + (activeScriptData?.scenes?.length || 0) + " scenes";
     document.getElementById("scriptTitle").value = activeScriptData?.title || "";
     document.getElementById("scriptHook").value = activeScriptData?.hook || "";
     document.getElementById("voiceoverText").value = activeScriptData?.voiceover || job.script || "";
     document.getElementById("scriptCta").value = activeScriptData?.cta || "";
+    writePlatformCopyToFields(job.platformCopy);
+    renderBufferQueueHistory(job);
+    refreshBufferPublishControls();
     renderSceneImageGallery(job.sceneImages || []);
-    document.getElementById("generateImagesBtn").disabled = !imageGenerationEnabled || !activeScriptData;
-    document.getElementById("generateImagesBtn").textContent = imageGenerationEnabled ? "Generate / Refresh AI Scene Images (Paid)" : "AI Scene Images · OFF";
+    updateImageGenerationControls();
     document.getElementById("voiceMode").value = job.voiceMode || "female";
     document.getElementById("femaleVoice").value = job.femaleVoice || "Kore";
     document.getElementById("maleVoice").value = job.maleVoice || "Orus";
@@ -1003,6 +1457,8 @@
   }
 
   async function openScriptStudio(jobId) {
+    document.getElementById("bufferVideoUrl").value = "";
+    refreshBufferChannels();
     activeJobId = jobId;
     activeJob = jobs.find(job => job.id === jobId) || null;
     if (!activeJob) return;
@@ -1075,15 +1531,26 @@
         voiceover: document.getElementById("voiceoverText").value.trim(),
         cta: document.getElementById("scriptCta").value.trim()
       };
+      const scriptChanged = !activeJob.scriptData ||
+        ["title", "hook", "voiceover", "cta"].some(key =>
+          String(activeJob.scriptData?.[key] || "") !== String(data[key] || "")
+        );
+      const patch = { scriptData: data, script: data.voiceover };
+      if (scriptChanged) patch.platformCopy = null;
       const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scriptData: data, script: data.voiceover })
+        body: JSON.stringify(patch)
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Script save नहीं हुई।");
       activeJob = result;
       activeScriptData = result.scriptData;
+      if (scriptChanged) {
+        writePlatformCopyToFields(null);
+        document.getElementById("socialCopyNote").textContent = "Script बदली है। नई platform copy generate करें।";
+      }
+      refreshBufferPublishControls();
       await loadJobs();
       setStudioStatus("आपके script edits save हो गए।");
     } catch (error) {
@@ -1159,11 +1626,22 @@
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Voice generation failed.");
-      activeJob.voiceFile = result.voiceFile;
+      if (result.job) activeJob = result.job;
+      else {
+        activeJob.voiceFile = result.voiceFile;
+        activeJob.voiceDurationSec = result.audioDurationSec;
+        activeJob.voiceDurationMatchesTarget = result.durationMatchesTarget;
+      }
+      refreshBufferPublishControls();
       voicePlayer.src = result.voiceFile + "?v=" + Date.now();
       voicePlayer.hidden = false;
       await loadJobs();
-      setStudioStatus("Hindi voice तैयार है · " + (result.voiceModeLabel || "Selected voice mode") + "। नीचे Play करके सुनें।");
+      setStudioStatus(
+        "Hindi voice तैयार है · " + (result.voiceModeLabel || "Selected voice mode") +
+        " · वास्तविक अवधि " + Number(result.audioDurationSec || 0).toFixed(1) +
+        " sec। चुनी हुई अवधि " + result.targetDurationSec +
+        " sec script का target है; final video actual voice duration के अनुसार बनेगी। नीचे Play करके सुनें।"
+      );
     } catch (error) {
       setStudioStatus(error.message || "Voice generation नहीं हो पाई।", true);
     } finally {
@@ -1238,8 +1716,11 @@
       canvas.width = 1080;
       canvas.height = 1920;
       const context = canvas.getContext("2d");
-      const introSec = 3;
-      const outroSec = 3;
+      const targetDuration = [15, 30, 45, 60].includes(Number(activeJob.duration))
+        ? Number(activeJob.duration)
+        : 45;
+      const introSec = targetDuration <= 15 ? 1.2 : targetDuration <= 30 ? 1.8 : targetDuration <= 45 ? 2.2 : 2.5;
+      const outroSec = introSec;
       let audioBuffer = null;
       let audioContext = null;
 
@@ -1255,26 +1736,62 @@
         }
       }
 
+      const voiceTailSec = 0.15;
       const totalSec = audioBuffer
-        ? audioBuffer.duration + 1.2
-        : Number(activeJob.duration || 45);
-      const contentSec = Math.max(5, totalSec - introSec - outroSec);
+        ? audioBuffer.duration + voiceTailSec
+        : targetDuration;
+      const contentSec = Math.max(0.5, totalSec - introSec - outroSec);
       const totalWeight = scenes.reduce((sum, scene) => sum + Math.max(1, Number(scene.duration_sec || 5)), 0);
+      const visualPlan = getActiveVisualPlan();
+      const savedImages = Array.isArray(activeJob.sceneImages) ? activeJob.sceneImages : [];
       const slides = [
         { type: "intro", duration: introSec, title: activeScriptData.title, body: activeScriptData.hook }
       ];
       scenes.forEach((scene, index) => {
-        slides.push({
-          type: "scene",
-          duration: contentSec * (Math.max(1, Number(scene.duration_sec || 5)) / totalWeight),
-          title: "SCENE " + String(index + 1).padStart(2, "0"),
-          body: scene.subtitle || scene.dialogue || "",
-          captions: Array.isArray(scene.subtitle_segments) && scene.subtitle_segments.length
-            ? scene.subtitle_segments
-            : [scene.subtitle || scene.dialogue || ""].filter(Boolean),
-          visual: scene.visual_direction || "",
-          imageUrl: (activeJob.sceneImages || []).find(image => image.sceneIndex === index)?.url || ""
-        });
+        const sceneWeight = Math.max(1, Number(scene.duration_sec || 5));
+        const sceneDuration = contentSec * (sceneWeight / totalWeight);
+        const scenePlan = visualPlan.scenes[index] || { shotCount: 1, imageCount: 1 };
+        const shotCount = Math.max(1, Number(scenePlan.shotCount || 1));
+        const sceneCaptions = Array.isArray(scene.subtitle_segments) && scene.subtitle_segments.length
+          ? scene.subtitle_segments
+          : [scene.subtitle || scene.dialogue || ""].filter(Boolean);
+        const sceneImages = savedImages.filter(image => Number(image.sceneIndex) === index);
+        for (let shotIndex = 0; shotIndex < shotCount; shotIndex++) {
+          const variantCount = Math.max(1, Number(scenePlan.imageCount || 1));
+          const variantIndex = shotIndex % variantCount;
+          const selectedImage = sceneImages.find(image =>
+            (Number.isInteger(Number(image.variantIndex)) ? Number(image.variantIndex) : 0) === variantIndex
+          ) || sceneImages[0] || null;
+          const captionStart = Math.min(
+            Math.max(0, sceneCaptions.length - 1),
+            Math.floor(shotIndex * sceneCaptions.length / shotCount)
+          );
+          const captionEnd = Math.min(
+            sceneCaptions.length,
+            Math.max(captionStart + 1, Math.floor((shotIndex + 1) * sceneCaptions.length / shotCount))
+          );
+          const shotCaptions = sceneCaptions.slice(captionStart, captionEnd);
+          const reusedOriginalImage = shotIndex > 0 && variantIndex === 0;
+          const alternateMovement = ["slow pan left", "slow pull-out", "slow pan right"];
+          slides.push({
+            type: "scene",
+            duration: sceneDuration / shotCount,
+            title: "SCENE " + String(index + 1).padStart(2, "0") + " · SHOT " + String(shotIndex + 1),
+            body: scene.subtitle || scene.dialogue || "",
+            captions: shotCaptions.length ? shotCaptions : [sceneCaptions[sceneCaptions.length - 1] || scene.subtitle || ""].filter(Boolean),
+            visual: scene.visual_direction || "",
+            subtitle: shotIndex === 0 ? scene.subtitle || "" : "",
+            shotType: reusedOriginalImage
+              ? (String(scene.shot_type || "").toLowerCase().includes("wide") ? "close-up detail shot" : "wide environmental shot")
+              : selectedImage?.shotType || scene.shot_type || "medium shot",
+            cameraMovement: shotIndex === 0
+              ? selectedImage?.cameraMovement || scene.camera_movement || "gentle push-in"
+              : alternateMovement[(shotIndex - 1) % alternateMovement.length],
+            transition: shotIndex === 0 ? scene.transition || "hard cut" : "hard cut",
+            audioCue: scene.audio_cue || "",
+            imageUrl: selectedImage?.url || ""
+          });
+        }
       });
       slides.push({ type: "outro", duration: outroSec, title: "ANTARDRISHTI", body: activeScriptData.cta || "और जानने के लिए follow करें।" });
 
@@ -1338,11 +1855,31 @@
           const image = slide.imageElement;
           const progress = Math.min(1, Math.max(0, elapsed / Math.max(0.1, slide.duration)));
           const baseScale = Math.max(w / image.width, h / image.height);
-          const motionScale = 1.015 + progress * 0.045;
+          const movement = String(slide.cameraMovement || "").toLowerCase();
+          const framing = String(slide.shotType || "").toLowerCase();
+          let startScale = 1.015;
+          let endScale = 1.06;
+          if (/push.?in|zoom.?in|dolly.?in/.test(movement)) {
+            startScale = 1.04;
+            endScale = 1.12;
+          } else if (/pull.?out|zoom.?out|dolly.?out/.test(movement)) {
+            startScale = 1.12;
+            endScale = 1.04;
+          } else {
+            startScale = 1.04;
+            endScale = 1.07;
+          }
+          const movementScale = /tilt/.test(movement) ? 1.06 : 1.0;
+          const framingScale = (/close.?up|detail/.test(framing) ? 1.1 : /wide/.test(framing) ? 1.02 : 1.04) * movementScale;
+          const motionScale = framingScale * (startScale + (endScale - startScale) * progress);
           const imageWidth = image.width * baseScale * motionScale;
           const imageHeight = image.height * baseScale * motionScale;
-          const driftX = Math.sin(progress * Math.PI) * 18;
-          const driftY = (0.5 - progress) * 14;
+          let driftX = Math.sin(progress * Math.PI) * 18;
+          let driftY = (0.5 - progress) * 14;
+          if (/pan left|move left|tracking left/.test(movement)) driftX += progress * 82;
+          else if (/pan right|move right|tracking right/.test(movement)) driftX -= progress * 82;
+          if (/tilt up|move up/.test(movement)) driftY += progress * 36;
+          else if (/tilt down|move down/.test(movement)) driftY -= progress * 36;
           context.drawImage(
             image,
             (w - imageWidth) / 2 + driftX,
@@ -1361,19 +1898,6 @@
           context.fillRect(0, 0, w, h);
         }
 
-        if (!slide.imageElement) {
-          context.globalAlpha = 0.23;
-          context.fillStyle = "#d8ad68";
-          context.beginPath();
-          context.arc(860 + Math.sin(elapsed * 0.5) * 25, 300, 210, 0, Math.PI * 2);
-          context.fill();
-          context.globalAlpha = 0.18;
-          context.beginPath();
-          context.arc(130, 1420, 300, 0, Math.PI * 2);
-          context.fill();
-          context.globalAlpha = 1;
-        }
-
         if (slide.imageElement) {
           const headerShade = context.createLinearGradient(0, 0, 0, 265);
           headerShade.addColorStop(0, "rgba(7, 15, 28, 0.94)");
@@ -1383,16 +1907,16 @@
         }
         context.fillStyle = "#e0bd7b";
         context.font = "600 30px Arial, 'Noto Sans Devanagari', sans-serif";
-        context.fillText("ANTARDRISHTI", 76, 112);
+        context.fillText("ANTARDRISHTI", 76, 292);
         context.fillStyle = "#d5dfeb";
         context.font = "24px Arial, 'Noto Sans Devanagari', sans-serif";
-        context.fillText("आत्म-जागरूकता", 78, 158);
+        context.fillText("आत्म-जागरूकता", 78, 338);
 
         context.strokeStyle = "#8f7349";
         context.lineWidth = 3;
         context.beginPath();
-        context.moveTo(78, 205);
-        context.lineTo(1002, 205);
+        context.moveTo(78, 375);
+        context.lineTo(920, 375);
         context.stroke();
 
         drawBrandLogo(context, w, h);
@@ -1422,9 +1946,14 @@
             Math.floor((Math.max(0, elapsed) / Math.max(0.1, slide.duration)) * sceneCaptions.length)
           );
           const activeCaption = sceneCaptions[captionIndex] || slide.body || "";
+          if (slide.subtitle) {
+            context.fillStyle = "#e2bd78";
+            context.font = "600 40px Arial, 'Noto Sans Devanagari', sans-serif";
+            wrapCanvasText(context, slide.subtitle, 78, 680, 900, 58, 2);
+          }
           context.fillStyle = "#f5f1e9";
           context.font = "600 58px Arial, 'Noto Sans Devanagari', sans-serif";
-          wrapCanvasText(context, activeCaption, 78, 730, 900, 84, 6);
+          wrapCanvasText(context, activeCaption, 78, slide.subtitle ? 825 : 760, 900, 84, 6);
           if (!slide.imageElement) {
             context.save();
             context.globalAlpha = 0.18;
@@ -1437,28 +1966,56 @@
             }
             context.restore();
           }
-          context.fillStyle = "#aab9cb";
-          context.font = "26px Arial, 'Noto Sans Devanagari', sans-serif";
-          context.fillText("आत्मचिंतन  ·  जागरूकता  ·  सीख", 78, 1510);
+
         }
 
-        context.fillStyle = "#b5c0cf";
-        context.font = "24px Arial, sans-serif";
-        context.font = "24px Arial, 'Noto Sans Devanagari', sans-serif";
-        context.fillText("आत्मचिंतन  ·  मन की समझ  ·  सीख", 78, 1790);
         context.fillStyle = "#d8b576";
-        context.fillRect(78, 1830, 924 * ((slideIndex + 1) / slides.length), 5);
+        context.fillRect(78, 1500, 760 * ((slideIndex + 1) / slides.length), 5);
       }
+
+      let lastRenderedSlideIndex = -1;
+      let transitionFrameCanvas = null;
 
       function renderAt(elapsedSec) {
         let cursor = 0;
+        let selectedIndex = slides.length - 1;
         for (let i = 0; i < slides.length; i++) {
-          const slide = slides[i];
-          if (elapsedSec < cursor + slide.duration || i === slides.length - 1) {
-            drawSlide(slide, i, elapsedSec - cursor);
-            return;
+          if (elapsedSec < cursor + slides[i].duration || i === slides.length - 1) {
+            selectedIndex = i;
+            break;
           }
-          cursor += slide.duration;
+          cursor += slides[i].duration;
+        }
+
+        const slide = slides[selectedIndex];
+        const localElapsed = elapsedSec - cursor;
+        if (selectedIndex !== lastRenderedSlideIndex) {
+          const previousTransition = selectedIndex > 0
+            ? String(slides[selectedIndex - 1].transition || "").toLowerCase()
+            : "";
+          if (lastRenderedSlideIndex >= 0 && /dissolve|cross.?fade|fade/.test(previousTransition)) {
+            if (!transitionFrameCanvas) {
+              transitionFrameCanvas = document.createElement("canvas");
+              transitionFrameCanvas.width = canvas.width;
+              transitionFrameCanvas.height = canvas.height;
+            }
+            const transitionContext = transitionFrameCanvas.getContext("2d");
+            transitionContext.clearRect(0, 0, canvas.width, canvas.height);
+            transitionContext.drawImage(canvas, 0, 0);
+          } else {
+            transitionFrameCanvas = null;
+          }
+          lastRenderedSlideIndex = selectedIndex;
+        }
+
+        drawSlide(slide, selectedIndex, localElapsed);
+        if (transitionFrameCanvas && localElapsed < 0.45) {
+          context.save();
+          context.globalAlpha = 1 - Math.min(1, localElapsed / 0.45);
+          context.drawImage(transitionFrameCanvas, 0, 0);
+          context.restore();
+        } else {
+          transitionFrameCanvas = null;
         }
       }
 
@@ -1539,7 +2096,11 @@
       subtitleDownload.textContent = "Download Hindi subtitles (.srt)";
 
       document.getElementById("videoResult").style.display = "block";
-      setStudioStatus("Slide video और Hindi subtitle file तैयार हैं। Video preview करें, फिर दोनों files download करें." + (audioBuffer ? " Hindi voice भी जोड़ी गई है।" : " Voice जोड़ने के लिए पहले Generate Hindi Voice दबाएँ।"));
+      setStudioStatus(
+        "Slide video और Hindi subtitle file तैयार हैं · final video लगभग " +
+        totalSec.toFixed(1) + " sec। " +
+        (audioBuffer ? "Video की अवधि actual Hindi voice के अनुसार रखी गई है।" : "Voice के बिना selected duration इस्तेमाल हुई है।")
+      );
       if (audioContext) await audioContext.close();
       return true;
     } catch (error) {
@@ -1555,6 +2116,22 @@
   scriptDialog.addEventListener("click", event => {
     if (event.target === scriptDialog) scriptDialog.close();
   });
+  document.getElementById("generateSocialCopyBtn").addEventListener("click", generateSocialCopy);
+  document.getElementById("saveSocialCopyBtn").addEventListener("click", saveSocialCopy);
+  document.getElementById("copyFacebookCaptionBtn").addEventListener("click", () => copySocialField("facebookCaption", "Facebook caption"));
+  document.getElementById("copyInstagramCaptionBtn").addEventListener("click", () => copySocialField("instagramCaption", "Instagram caption"));
+  document.getElementById("copyYoutubeTitleBtn").addEventListener("click", () => copySocialField("youtubeTitle", "YouTube title"));
+  document.getElementById("copyYoutubeDescriptionBtn").addEventListener("click", () => copySocialField("youtubeDescription", "YouTube description"));
+  document.getElementById("refreshBufferChannelsBtn").addEventListener("click", refreshBufferChannels);
+  document.getElementById("bufferChannelSelect").addEventListener("change", refreshBufferPublishControls);
+  document.getElementById("bufferVideoUrl").addEventListener("input", refreshBufferPublishControls);
+  ["facebookCaption", "instagramCaption", "youtubeTitle", "youtubeDescription"].forEach(id => {
+    document.getElementById(id).addEventListener("input", refreshBufferPublishControls);
+  });
+  document.getElementById("sendToBufferBtn").addEventListener("click", sendVideoToBuffer);
+  document.getElementById("reelsSafeAreaToggle").addEventListener("change", event => {
+    document.getElementById("reelsSafeAreaOverlay").hidden = !event.target.checked;
+  });
   document.getElementById("generateScriptBtn").addEventListener("click", () => generateScript(false));
   document.getElementById("convertScriptBtn").addEventListener("click", convertCurrentScriptToDevanagari);
   document.getElementById("saveScriptBtn").addEventListener("click", saveScriptEdits);
@@ -1565,6 +2142,7 @@
   document.getElementById("uploadBrandLogoBtn").addEventListener("click", uploadBrandLogo);
   document.getElementById("removeBrandLogoBtn").addEventListener("click", removeBrandLogo);
     document.getElementById("generateImagesBtn").addEventListener("click", generateSceneImages);
+  updateImageGenerationControls();
   document.getElementById("autoCreateVideoBtn").addEventListener("click", autoCreateVideo);
   document.getElementById("renderVideoBtn").addEventListener("click", createSlideVideo);
 

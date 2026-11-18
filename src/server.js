@@ -3,6 +3,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
+import { readJobs as readJobStore, writeJobs as writeJobStore } from "./job-store.js";
+import { getRecommendedSceneCount, preserveSceneProductionFields, validateScriptData } from "./script-validation.js";
+import { buildCloudflareScenePrompt } from "./image-prompt.js";
+import { getAlternateShotType, getVideoVisualPlan, getVisualImageTargets } from "./visual-plan.js";
+import { classifyCloudflareImageError } from "./cloudflare-errors.js";
+import { buildBufferVideoPostInput } from "./buffer-api.js";
+import { assertBufferPublishAllowed, recordBufferQueuePost, resetBufferApprovalIfContentChanged } from "./publishing-guard.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -36,11 +43,11 @@ const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || "";
 const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN || "";
 const CLOUDFLARE_IMAGE_MODEL = process.env.CLOUDFLARE_IMAGE_MODEL || "@cf/black-forest-labs/flux-1-schnell";
 const CLOUDFLARE_IMAGE_STEPS = Math.max(1, Math.min(4, Number(process.env.CLOUDFLARE_IMAGE_STEPS || 4)));
-const BUFFER_API_KEY = String(process.env.BUFFER_API_KEY || "").trim();
-const CLOUDFLARE_IMAGE_DAILY_LIMIT = 100;
+const CLOUDFLARE_IMAGE_DAILY_LIMIT = 30;
 const IMAGE_USAGE_FILE = path.join(DATA_DIR, "cloudflare-image-usage.json");
 const CLOUDFLARE_IMAGE_ENABLED = process.env.CLOUDFLARE_IMAGE_ENABLED === "true" &&
   Boolean(CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN);
+const BUFFER_API_KEY = process.env.BUFFER_API_KEY || "";
 const FEMALE_TTS_VOICES = new Set(["Kore", "Aoede", "Leda", "Zephyr", "Gacrux"]);
 const MALE_TTS_VOICES = new Set(["Orus", "Puck", "Charon", "Algieba", "Sadaltager"]);
 const DEFAULT_FEMALE_VOICE = "Kore";
@@ -54,56 +61,8 @@ app.use(express.json({ limit: "3mb" }));
 app.use(express.static(path.join(__dirname, "..", "public")));
 app.use("/outputs", express.static(OUTPUT_DIR));
 
-function readJobs() {
-  try { return JSON.parse(fs.readFileSync(JOBS_FILE, "utf8")); }
-  catch { return []; }
-}
-
-function writeJobs(jobs) {
-  const tempFile = JOBS_FILE + ".tmp";
-  fs.writeFileSync(tempFile, JSON.stringify(jobs, null, 2), "utf8");
-  fs.renameSync(tempFile, JOBS_FILE);
-}
-
-async function bufferGraphQL(query) {
-  if (!BUFFER_API_KEY) {
-    const error = new Error("Buffer API key सेट नहीं है। Project की local .env file में BUFFER_API_KEY जोड़ें और server restart करें।");
-    error.status = 400;
-    throw error;
-  }
-
-  const response = await fetch("https://api.buffer.com", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: "Bearer " + BUFFER_API_KEY
-    },
-    body: JSON.stringify({ query }),
-    signal: AbortSignal.timeout(15000)
-  });
-
-  let payload;
-  try {
-    payload = await response.json();
-  } catch {
-    throw new Error("Buffer API से पढ़ने योग्य response नहीं मिला।");
-  }
-
-  const errors = Array.isArray(payload?.errors) ? payload.errors : [];
-  if (!response.ok || errors.length) {
-    const message = errors.map(item => item.message).filter(Boolean).join("; ");
-    const error = new Error(
-      response.status === 401
-        ? "Buffer API key स्वीकार नहीं हुई। Buffer Settings → API में key जाँचें।"
-        : message || "Buffer API request असफल रही (HTTP " + response.status + ")."
-    );
-    error.status = response.status === 401 ? 401 : 502;
-    throw error;
-  }
-
-  if (!payload?.data) throw new Error("Buffer API response में data नहीं मिला।");
-  return payload.data;
-}
+function readJobs() { return readJobStore(JOBS_FILE); }
+function writeJobs(jobs) { return writeJobStore(JOBS_FILE, jobs); }
 
 function pcmToWav(pcm, sampleRate = 24000, channels = 1, bitsPerSample = 16) {
   const header = Buffer.alloc(44);
@@ -191,13 +150,16 @@ async function generateCloudflareSceneImage(prompt) {
       const messageBody = contentType.includes("application/json")
         ? await response.json().catch(() => ({}))
         : { errors: [{ message: (await response.text().catch(() => "")).slice(0, 300) }] };
-      const apiMessage = messageBody?.errors?.map(item => item.message).filter(Boolean).join("; ");
-      const error = new Error(
-        response.status === 429
-          ? "Cloudflare की daily free AI quota या rate limit पूरी हो गई है। कोई paid fallback नहीं होगा।"
-          : apiMessage || "Cloudflare Workers AI image request failed (HTTP " + response.status + ")."
-      );
-      error.status = response.status === 429 ? 429 : response.status >= 500 ? 502 : response.status;
+      const details = classifyCloudflareImageError({
+        httpStatus: response.status,
+        payload: messageBody,
+        retryAfterHeader: response.headers.get("retry-after")
+      });
+      const error = new Error(details.message);
+      error.status = details.status;
+      error.cloudflareErrorCode = details.code;
+      error.retryAfterSeconds = details.retryAfterSeconds;
+      error.cfRay = response.headers.get("cf-ray") || "";
       throw error;
     }
 
@@ -389,10 +351,15 @@ async function callGemini(body) {
 
 function findJob(id) {
   const jobs = readJobs();
-  return { jobs, job: jobs.find(item => item.id === id) };
+  const job = jobs.find(item => item.id === id);
+  if (job?.scriptData?.scenes?.length) {
+    job.visualPlan = getVideoVisualPlan(job.duration, job.scriptData.scenes.length);
+  }
+  return { jobs, job };
 }
 
 app.get("/api/health", (_req, res) => {
+  const imageUsageToday = readImageUsage().count;
   res.json({
     ok: true,
     app: "Antardrishti AI Video Studio",
@@ -403,8 +370,226 @@ app.get("/api/health", (_req, res) => {
     imageProvider: "Cloudflare Workers AI Free Tier",
     imageModel: CLOUDFLARE_IMAGE_MODEL,
     imageDailyLimit: CLOUDFLARE_IMAGE_DAILY_LIMIT,
-    imageUsageToday: readImageUsage().count
+    imageUsageToday,
+    imageImagesRemaining: Math.max(0, CLOUDFLARE_IMAGE_DAILY_LIMIT - imageUsageToday),
+    imageLimitType: "Studio safety cap; Cloudflare Neurons quota is separate"
   });
+});
+
+
+async function callBufferApi(query, variables = {}) {
+  if (!BUFFER_API_KEY) {
+    const error = new Error("Buffer API key configured नहीं है। local .env में BUFFER_API_KEY जोड़ें और server restart करें।");
+    error.status = 503;
+    throw error;
+  }
+
+  const response = await fetch("https://api.buffer.com", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: "Bearer " + BUFFER_API_KEY
+    },
+    body: JSON.stringify({ query, variables })
+  });
+
+  let payload;
+  try { payload = await response.json(); }
+  catch { throw new Error("Buffer API ने readable response नहीं दिया।"); }
+
+  if (!response.ok) {
+    const error = new Error("Buffer API request failed (HTTP " + response.status + ").");
+    error.status = response.status === 401 || response.status === 403 ? 502 : 503;
+    throw error;
+  }
+  if (Array.isArray(payload.errors) && payload.errors.length) {
+    throw new Error(String(payload.errors[0]?.message || "Buffer API request failed.").slice(0, 500));
+  }
+  return payload.data || {};
+}
+
+async function fetchBufferOrganizationsAndChannels() {
+  const accountData = await callBufferApi(
+    "query BufferAccount { account { id organizations { id name } } }"
+  );
+  const account = accountData.account;
+  if (!account) throw new Error("Buffer account response में account नहीं मिला।");
+
+  const organizations = Array.isArray(account.organizations) ? account.organizations : [];
+  const results = await Promise.all(organizations.map(async organization => {
+    const query = "query BufferChannels { channels(input: { organizationId: " +
+      JSON.stringify(organization.id) + " }) { id name service } }";
+    const data = await callBufferApi(query);
+    return {
+      id: organization.id,
+      name: organization.name,
+      channels: Array.isArray(data.channels) ? data.channels : []
+    };
+  }));
+
+  return { account: { id: account.id }, organizations: results };
+}
+
+app.get("/api/buffer/status", async (_req, res) => {
+  if (!BUFFER_API_KEY) {
+    return res.json({
+      configured: false,
+      connected: false,
+      message: "BUFFER_API_KEY local .env में जोड़ें।"
+    });
+  }
+  try {
+    const data = await fetchBufferOrganizationsAndChannels();
+    res.json({ configured: true, connected: true, ...data });
+  } catch (error) {
+    res.status(error.status || 502).json({
+      configured: true,
+      connected: false,
+      error: error.message || "Buffer से connect नहीं हो पाया।"
+    });
+  }
+});
+
+app.post("/api/jobs/:id/generate-social-copy", async (req, res) => {
+  const { jobs, job } = findJob(req.params.id);
+  if (!job) return res.status(404).json({ error: "Video brief not found." });
+  const script = job.scriptData;
+  if (!script || !String(script.voiceover || "").trim()) {
+    return res.status(400).json({ error: "पहले Hindi video script generate करें।" });
+  }
+
+  const schema = {
+    type: "object",
+    properties: {
+      facebookCaption: { type: "string" },
+      instagramCaption: { type: "string" },
+      youtubeTitle: { type: "string" },
+      youtubeDescription: { type: "string" }
+    },
+    required: ["facebookCaption", "instagramCaption", "youtubeTitle", "youtubeDescription"]
+  };
+
+  try {
+    const payload = await callGemini({
+      model: GEMINI_TEXT_MODEL,
+      input: [
+        "Create platform-specific publishing copy for one Antardrishti Hindi self-awareness short video.",
+        "Use the video script below as the only source. Preserve its meaning. Do not invent statistics, medical claims, diagnoses, cures or promises.",
+        "Write natural Hindi in Devanagari, with roughly 90% Hindi and at most 10% natural English.",
+        "All hashtags must be English lowercase words. Add a small relevant set; do not stuff hashtags.",
+        "FACEBOOK: write a warm, readable caption with a strong first line, 2 short paragraphs, a clear CTA and 3 to 5 lowercase English hashtags. Aim for 50 to 90 words.",
+        "INSTAGRAM: write a distinct Reel caption, not a copy of Facebook. Put a strong hook in the first line, keep it concise, include a natural CTA and 5 to 8 lowercase English hashtags. Use emojis sparingly.",
+        "YOUTUBE SHORTS: write a clear Hindi title of no more than 80 characters (never exceed 100), and a separate description of 2 to 4 short lines with a CTA and 3 to 5 lowercase English hashtags.",
+        "Do not include platform labels, quotation marks around the copy, markdown code fences or explanations.",
+        "Return only valid JSON matching this schema: " + JSON.stringify(schema),
+        "VIDEO TOPIC: " + job.topic,
+        "VIDEO TITLE: " + (script.title || ""),
+        "OPENING HOOK: " + (script.hook || ""),
+        "VOICEOVER: " + script.voiceover,
+        "CALL TO ACTION: " + (script.cta || "")
+      ].join("\n"),
+      response_format: { type: "text", mime_type: "application/json", schema },
+      generation_config: { max_output_tokens: 1400 }
+    });
+
+    let copy;
+    try { copy = JSON.parse(getModelText(payload)); }
+    catch { return res.status(502).json({ error: "Social Media Pack का response सही JSON नहीं था। फिर कोशिश करें।" }); }
+
+    for (const field of schema.required) {
+      if (typeof copy[field] !== "string" || !copy[field].trim()) {
+        return res.status(502).json({ error: "Social Media Pack में " + field + " खाली है। फिर कोशिश करें।" });
+      }
+      copy[field] = copy[field].trim();
+    }
+    if (copy.youtubeTitle.length > 100) {
+      return res.status(422).json({ error: "YouTube title 100 characters से लंबा आया। Social Media Pack फिर generate करें।" });
+    }
+
+    job.platformCopy = copy;
+    resetBufferApprovalIfContentChanged(job);
+    job.updatedAt = new Date().toISOString();
+    writeJobs(jobs);
+    res.json({ ok: true, platformCopy: copy, job });
+  } catch (error) {
+    res.status(error.status || 502).json({
+      error: error.message || "Social Media Pack generate नहीं हो पाया।"
+    });
+  }
+});
+
+app.post("/api/jobs/:id/buffer/queue", async (req, res) => {
+  const { jobs, job } = findJob(req.params.id);
+  if (!job) return res.status(404).json({ error: "Video brief not found." });
+  if (!BUFFER_API_KEY) {
+    return res.status(503).json({ error: "पहले local .env में BUFFER_API_KEY जोड़ें और server restart करें।" });
+  }
+
+  const channelId = String(req.body?.channelId || "").trim();
+  const videoUrl = String(req.body?.videoUrl || "").trim();
+  if (!channelId) return res.status(400).json({ error: "Buffer channel चुनें।" });
+
+  try {
+    const videoFingerprint = assertBufferPublishAllowed(job, { channelId, videoUrl });
+    const bufferData = await fetchBufferOrganizationsAndChannels();
+    const channel = bufferData.organizations
+      .flatMap(organization => organization.channels)
+      .find(item => item.id === channelId);
+    if (!channel) return res.status(400).json({ error: "Selected Buffer channel आपके connected account में नहीं मिला।" });
+
+    // Always publish the saved copy that was reviewed and approved; ignore unsaved browser edits.
+    const platformCopy = job.platformCopy;
+    const input = buildBufferVideoPostInput({
+      channel,
+      videoUrl,
+      platformCopy,
+      isAiGenerated: req.body?.isAiGenerated !== false
+    });
+
+    const mutation = `mutation CreatePost($input: CreatePostInput!) {
+      createPost(input: $input) {
+        ... on PostActionSuccess {
+          post { id text dueAt status channelId }
+        }
+        ... on MutationError { message }
+      }
+    }`;
+    const result = await callBufferApi(mutation, { input });
+    const action = result.createPost;
+    if (action?.message) throw new Error(action.message);
+    if (!action?.post?.id) throw new Error("Buffer ने post ID वापस नहीं किया।");
+    recordBufferQueuePost(job, {
+      videoFingerprint,
+      postId: action.post.id,
+      channelId: channel.id,
+      channelName: channel.name,
+      platform: channel.service,
+      dueAt: action.post.dueAt || null
+    });
+    if (platformCopy && typeof platformCopy === "object") {
+      const savedCopy = {};
+      for (const field of ["facebookCaption", "instagramCaption", "youtubeTitle", "youtubeDescription"]) {
+        if (typeof platformCopy[field] === "string") {
+          savedCopy[field] = platformCopy[field].trim().slice(0, field === "youtubeTitle" ? 100 : 5000);
+        }
+      }
+      job.platformCopy = savedCopy;
+    }
+    job.updatedAt = new Date().toISOString();
+    writeJobs(jobs);
+    res.json({
+      ok: true,
+      queued: true,
+      platform: channel.service,
+      channelName: channel.name,
+      post: action.post,
+      job
+    });
+  } catch (error) {
+    res.status(error.status || 502).json({
+      error: error.message || "Buffer Queue में post नहीं जा पाया।"
+    });
+  }
 });
 
 app.get("/api/brand/logo", (_req, res) => {
@@ -492,7 +677,15 @@ app.delete("/api/brand/logo", (_req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/api/jobs", (_req, res) => res.json(readJobs()));
+app.get("/api/jobs", (_req, res) => {
+  const jobs = readJobs().map(job => ({
+    ...job,
+    visualPlan: job.scriptData?.scenes?.length
+      ? getVideoVisualPlan(job.duration, job.scriptData.scenes.length)
+      : null
+  }));
+  res.json(jobs);
+});
 
 app.post("/api/jobs", (req, res) => {
   const { topic, format = "mixed", duration = 45 } = req.body || {};
@@ -501,17 +694,21 @@ app.post("/api/jobs", (req, res) => {
   const allowedFormats = new Set(["mixed", "presenter", "cinematic"]);
   const selectedFormat = allowedFormats.has(format) ? format : "mixed";
   const numericDuration = Number(duration);
+  const allowedDurations = new Set([15, 30, 45, 60]);
+  const selectedDuration = allowedDurations.has(numericDuration) ? numericDuration : 45;
   const job = {
     id: randomUUID(),
     topic: topic.trim().slice(0, 300),
     format: selectedFormat,
-    duration: Math.max(15, Math.min(90, Number.isFinite(numericDuration) ? numericDuration : 45)),
+    duration: selectedDuration,
     language: "Hindi 90%, English 10%",
     aspectRatio: "9:16",
     status: "brief_created",
     script: "",
     scriptData: null,
     voiceFile: "",
+    voiceDurationSec: null,
+    voiceDurationMatchesTarget: null,
     sceneImages: [],
     voiceMode: "female",
     femaleVoice: DEFAULT_FEMALE_VOICE,
@@ -531,6 +728,11 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
   const { jobs, job } = findJob(req.params.id);
   if (!job) return res.status(404).json({ error: "Video brief not found." });
 
+  const expectedSceneCount = getRecommendedSceneCount(job.duration);
+  const targetWordRanges = { 15: "28–36", 30: "56–68", 45: "84–100", 60: "112–132" };
+  const targetWordRange = targetWordRanges[job.duration] ||
+    (Math.round(Number(job.duration) * 1.8) + "–" + Math.round(Number(job.duration) * 2.1));
+  const subtitleSegmentRange = Number(job.duration) <= 15 ? "2 or 3" : "3 or 4";
   const schema = {
     type: "object",
     properties: {
@@ -544,15 +746,19 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
           properties: {
             duration_sec: { type: "integer" },
             dialogue: { type: "string", description: "Presenter dialogue in Devanagari Hindi, never Roman Hindi." },
-            visual_direction: { type: "string", description: "Internal visual-production prompt. English is allowed here; this text is not spoken and is not shown as a subtitle." },
+            visual_direction: { type: "string", description: "Internal visual prompt: exact subject, action, setting, culture, lighting and composition. Respect abstract-only directions." },
+            shot_type: { type: "string", description: "Choose an executable framing such as close-up, medium shot, wide shot, overhead or detail shot. The image prompt and renderer must use it." },
+            camera_movement: { type: "string", description: "Choose an executable movement: slow push-in, pull-out, pan left/right, tilt up/down or gentle tracking. The renderer applies simulated motion to the still image." },
+            transition: { type: "string", description: "Describe a simple edit transition into the next scene, such as hard cut, dissolve, match cut or whip pan." },
+            audio_cue: { type: "string", description: "Short music or sound-effect cue that supports the scene without competing with Hindi dialogue." },
             subtitle: { type: "string", description: "A short central idea subtitle in Devanagari Hindi." },
             subtitle_segments: {
               type: "array",
-              description: "Three or four short Devanagari Hindi captions, in spoken order, each ideally 3 to 7 words. Together they should cover the scene dialogue, not add new claims.",
+              description: subtitleSegmentRange + " short Devanagari Hindi captions, in spoken order, each ideally 3 to 7 words. Together they should cover the scene dialogue, not add new claims.",
               items: { type: "string" }
             }
           },
-          required: ["duration_sec", "dialogue", "visual_direction", "subtitle", "subtitle_segments"]
+          required: ["duration_sec", "dialogue", "visual_direction", "shot_type", "camera_movement", "transition", "audio_cue", "subtitle", "subtitle_segments"]
         }
       },
       cta: { type: "string", description: "A short spoken call-to-action in Devanagari Hindi." },
@@ -576,14 +782,20 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
     "- The title, hook, voiceover, scene dialogue, subtitles and CTA must be in natural Hindi using Devanagari. Keep English words to at most about 10% and use them only when natural.",
     "- Correct style example: \"क्या आप जानते हैं कि आपका मन आपके अनुभवों को कैसे प्रभावित करता है?\" Incorrect style: \"Kya aap jaante hain ki aapka man...\"",
     "- Warm, grounded Indian Hindi voice. Use everyday language, not stiff translated Hindi.",
-    "- Make the voiceover fit the selected duration.",
+    "- Make the voiceover fit the selected duration. Aim for approximately " + targetWordRange + " spoken Hindi words, including hook and CTA, at a calm Indian Hindi narration pace. Do not pad with repetition.",
     "- Write a strong hook for the first 2–3 seconds.",
-    "- Provide exactly 3 concise scenes. Each scene must include dialogue in Devanagari Hindi, a short subtitle in Devanagari Hindi, 3 or 4 sequential subtitle_segments in Devanagari Hindi, and a practical visual direction.",
+    "- Provide exactly " + expectedSceneCount + " scenes. Divide the selected duration across scenes in whole seconds, with durations adding up to exactly " + job.duration + " seconds. Use 3 scenes for 15/30 seconds, 5 for 45 seconds and 6 for 60 seconds.",
+    "- Each scene needs dialogue in Devanagari Hindi, a short central subtitle, " + subtitleSegmentRange + " sequential subtitle_segments and a visual direction specific to that dialogue.",
+    "- Specify shot_type, camera_movement, transition and audio_cue for every scene. These must be executable instructions, not labels only.",
     "- Each subtitle segment should be a natural spoken phrase of about 3–7 words. Keep the segments in the same order as the dialogue so they can appear one after another during that scene.",
     "- Do not put Scene 1, Scene 2, Scene 3, scene numbers, headings or labels in dialogue or subtitles.",
     "- Visual directions are internal production prompts, not audience copy. They may be written in clear English so future image/video models can understand them.",
     "- Move quickly from hook to explanation to one useful takeaway and CTA.",
-    "- Visual directions should describe visuals that can be composed from typography, shapes and gradients. Do not ask to draw text inside an AI image.",
+    "- Visual directions may call for photorealistic Indian settings, people, objects or abstract animation. Follow the exact direction; never replace an abstract visual with an unrelated portrait.",
+    "- When a person or real-world setting is relevant, use natural-looking Indian people and an authentic contemporary Indian environment. Avoid generic Western stock-photo styling and stereotypes.",
+    "- Do not force people into a scene. If the direction says abstract, symbolic, graphic or object-only, keep it that way.",
+    "- Use scene-specific shot types and camera moves that match the subject. A wide shot must establish the setting; a close-up must frame the subject closely.",
+    "- Do not ask the image model to draw captions or lettering; the editor overlays Hindi text.",
     "- Use the Devanagari voiceover as exact narration text. Do not include scene headings inside voiceover.",
     "",
     "SAFETY AND ACCURACY",
@@ -602,7 +814,7 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
       model: GEMINI_TEXT_MODEL,
       input: prompt,
       response_format: { type: "text", mime_type: "application/json", schema },
-      generation_config: { max_output_tokens: 1400 }
+      generation_config: { max_output_tokens: 2400 }
     });
     const text = getModelText(payload);
     if (!text) return res.status(502).json({ error: "Gemini ने खाली script response दिया।" });
@@ -625,13 +837,13 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
           "Correct this video script. Its Hindi has been written in Roman letters.",
           "Rewrite title, hook, voiceover, every scene dialogue, every subtitle and CTA in natural Hindi using Devanagari script.",
           "Never use Roman Hindi. Common English words and acronyms may remain, but keep English below 10 percent.",
-          "Keep visual_direction in English. Preserve the topic and meaning. Keep the selected duration and exactly 3 scenes.",
+          "Keep visual_direction in English. Preserve the topic and meaning. Keep the selected duration of " + job.duration + " seconds and exactly " + expectedSceneCount + " scenes. Their integer durations must add up to " + job.duration + " seconds.",
           "Return JSON only, following this schema: " + JSON.stringify(schema),
           "SCRIPT TO CORRECT:",
           JSON.stringify(scriptData)
         ].join("\\n"),
         response_format: { type: "text", mime_type: "application/json", schema },
-        generation_config: { max_output_tokens: 1400 }
+        generation_config: { max_output_tokens: 2400 }
       });
       const correctedText = getModelText(correction);
       try {
@@ -653,9 +865,35 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
       });
     }
 
+    if (scriptData.scenes.length !== expectedSceneCount) {
+      return res.status(422).json({
+        error: "इस " + job.duration + " सेकंड के video के लिए " + expectedSceneCount +
+          " scenes चाहिए। Generated script में " + scriptData.scenes.length +
+          " scenes मिले। Generate Script फिर दबाएँ।"
+      });
+    }
+
+    const scriptIssues = validateScriptData(scriptData, job.duration);
+    if (scriptIssues.length) {
+      return res.status(422).json({
+        error: "Generated script का production check पास नहीं हुआ: " + scriptIssues.slice(0, 5).join(" ")
+      });
+    }
+
+    for (const image of job.sceneImages || []) {
+      const fileName = path.basename(String(image.url || ""));
+      if (fileName.startsWith(job.id + "-scene-")) {
+        fs.rmSync(path.join(OUTPUT_DIR, fileName), { force: true });
+      }
+    }
+    job.sceneImages = [];
     job.scriptData = scriptData;
+    job.visualPlan = getVideoVisualPlan(job.duration, scriptData.scenes.length);
     job.script = scriptData.voiceover;
     job.voiceFile = "";
+    job.voiceDurationSec = null;
+    job.voiceDurationMatchesTarget = null;
+    job.platformCopy = null;
     job.status = "script_ready";
     job.updatedAt = new Date().toISOString();
     writeJobs(jobs);
@@ -679,62 +917,136 @@ app.post("/api/jobs/:id/generate-scene-images", async (req, res) => {
     return res.status(400).json({ error: "पहले video script generate करें।" });
   }
 
-  const scenes = job.scriptData.scenes.slice(0, 5);
+  const scenes = job.scriptData.scenes.slice(0, 6);
+  const visualPlan = getVideoVisualPlan(job.duration, scenes.length);
+  job.visualPlan = visualPlan;
+  const allTargets = getVisualImageTargets(visualPlan);
+  const hasTargetSelection = req.body?.sceneIndex !== undefined || req.body?.variantIndex !== undefined;
+  const selectedSceneIndex = Number(req.body?.sceneIndex);
+  const selectedVariantIndex = Number(req.body?.variantIndex ?? 0);
+  if (hasTargetSelection && (
+    !Number.isInteger(selectedSceneIndex) ||
+    !Number.isInteger(selectedVariantIndex) ||
+    !allTargets.some(target => target.sceneIndex === selectedSceneIndex && target.variantIndex === selectedVariantIndex)
+  )) {
+    return res.status(400).json({ error: "Selected scene image target valid नहीं है।" });
+  }
+
+  const targets = hasTargetSelection
+    ? allTargets.filter(target => target.sceneIndex === selectedSceneIndex && target.variantIndex === selectedVariantIndex)
+    : allTargets;
   const force = req.body?.force === true;
-  const savedImages = Array.isArray(job.sceneImages) ? job.sceneImages : [];
+  const existingImages = Array.isArray(job.sceneImages) ? job.sceneImages : [];
+  const savedImages = existingImages.map(item => ({
+    ...item,
+    variantIndex: Number.isInteger(Number(item.variantIndex)) ? Number(item.variantIndex) : 0
+  })).filter(item =>
+    Number(item.sceneIndex) >= 0 &&
+    Number(item.sceneIndex) < scenes.length &&
+    Number(item.variantIndex) >= 0
+  );
   const results = [];
   const safeTopic = String(job.topic || "").replace(/[\r\n]+/g, " ").slice(0, 200);
 
-  try {
-    for (let index = 0; index < scenes.length; index++) {
-      const existing = savedImages.find(item => item.sceneIndex === index && item.url);
-      if (!force && existing && fs.existsSync(path.join(OUTPUT_DIR, path.basename(existing.url)))) {
-        results.push(existing);
-        continue;
-      }
+  const pendingTargets = targets.filter(target => {
+    const existing = savedImages.find(item =>
+      Number(item.sceneIndex) === target.sceneIndex &&
+      Number(item.variantIndex) === target.variantIndex &&
+      item.url
+    );
+    const existsOnDisk = existing && fs.existsSync(path.join(OUTPUT_DIR, path.basename(existing.url)));
+    return force || !existsOnDisk;
+  });
 
-      const visualDirection = String(scenes[index].visual_direction || "").trim();
-      const prompt = [
-        "Create one premium, cinematic square still image to use as a clean background visual for a vertical 9:16 Hindi self-awareness video.",
-        "Video topic: " + safeTopic,
-        "Visual description: " + (visualDirection || "Create a calm, reflective scene that matches the video topic."),
-        "Visual style: photorealistic cinematic photography, tasteful composition, natural light, restrained navy and warm neutral palette, detailed environment, emotionally calm and respectful.",
-        "Composition: square image designed for a centered 9:16 crop. Keep the main subject exactly in the central 55 percent of the image width. If a person is shown, use a medium shot with the full head and face visible, centered, not cut off and not pushed to the edge. If an object is shown, show the whole object with clear margin. Leave the lower third calm and uncluttered for Hindi captions added later by the editor.",
-        "IMPORTANT: The image must contain no writing at all. Do not draw words, letters, numbers, labels, signs, titles, headings, captions, subtitles, logos, watermarks, scene names, scene numbers, UI or borders.",
-        "Do not write or depict the words Scene, Scene 1, Scene 2, Scene 3, or any numbered scene label.",
-        "Avoid medical imagery, hospital scenes, distressed patients, diagnostic symbols, supernatural claims or frightening imagery.",
-        "Create one coherent photograph, not a collage, storyboard, split panel, contact sheet or poster."
-      ].join("\n");
+  if (!pendingTargets.length) {
+    return res.json({ ok: true, job, sceneImages: savedImages, generatedImages: 0, visualPlan });
+  }
+
+  try {
+    for (const target of pendingTargets) {
+      const scene = scenes[target.sceneIndex];
+      const visualDirection = String(scene.visual_direction || "").trim();
+      const originalShotType = String(scene.shot_type || "medium shot").trim();
+      const shotType = target.variantIndex === 0
+        ? originalShotType
+        : getAlternateShotType(originalShotType);
+      const cameraMovement = target.variantIndex === 0
+        ? String(scene.camera_movement || "gentle push-in").trim()
+        : "slow pan with a gentle push-in";
+      const dialogueContext = String(scene.dialogue || scene.subtitle || "").trim().slice(0, 500);
+      const variantDirection = target.variantIndex === 0
+        ? visualDirection || "Create a calm, reflective scene that matches the video topic."
+        : "Create a distinct complementary cutaway for this same scene. Keep the same subject, setting and story, but change camera angle and visual composition. Director's scene direction: " +
+          (visualDirection || "Create a calm, reflective scene that matches the video topic.");
+      const prompt = buildCloudflareScenePrompt({
+        topic: safeTopic,
+        dialogueContext,
+        visualDirection: variantDirection,
+        shotType,
+        cameraMovement
+      });
 
       const generated = await generateCloudflareSceneImage(prompt);
       const extension = generated.mimeType.includes("jpeg") || generated.mimeType.includes("jpg")
         ? "jpg" : generated.mimeType.includes("webp") ? "webp" : "png";
-      const fileName = job.id + "-scene-" + (index + 1) + "." + extension;
+      const fileName = job.id + "-scene-" + (target.sceneIndex + 1) +
+        "-variant-" + (target.variantIndex + 1) + "." + extension;
       fs.writeFileSync(path.join(OUTPUT_DIR, fileName), generated.buffer);
       const item = {
-        sceneIndex: index,
+        sceneIndex: target.sceneIndex,
+        variantIndex: target.variantIndex,
+        shotType,
+        cameraMovement,
         url: "/outputs/" + fileName,
         mimeType: generated.mimeType,
         model: CLOUDFLARE_IMAGE_MODEL,
         generatedAt: new Date().toISOString()
       };
-      const priorIndex = savedImages.findIndex(image => image.sceneIndex === index);
-      if (priorIndex >= 0) savedImages[priorIndex] = item;
-      else savedImages.push(item);
+      const priorIndex = savedImages.findIndex(image =>
+        Number(image.sceneIndex) === target.sceneIndex &&
+        Number(image.variantIndex) === target.variantIndex
+      );
+      if (priorIndex >= 0) {
+        const previousFile = path.basename(String(savedImages[priorIndex].url || ""));
+        if (previousFile && previousFile !== fileName && previousFile.startsWith(job.id + "-scene-")) {
+          fs.rmSync(path.join(OUTPUT_DIR, previousFile), { force: true });
+        }
+        savedImages[priorIndex] = item;
+      } else {
+        savedImages.push(item);
+      }
       job.sceneImages = savedImages;
+      resetBufferApprovalIfContentChanged(job);
       job.updatedAt = new Date().toISOString();
       writeJobs(jobs);
       results.push(item);
     }
 
-    job.sceneImages = savedImages.sort((a, b) => a.sceneIndex - b.sceneIndex);
+    job.sceneImages = savedImages.sort((a, b) =>
+      Number(a.sceneIndex) - Number(b.sceneIndex) || Number(a.variantIndex) - Number(b.variantIndex)
+    );
     job.updatedAt = new Date().toISOString();
     writeJobs(jobs);
-    res.json({ ok: true, job, sceneImages: job.sceneImages });
+    res.json({
+      ok: true,
+      job,
+      sceneImages: job.sceneImages,
+      generatedImages: results.length,
+      visualPlan
+    });
   } catch (error) {
+    job.sceneImages = savedImages;
+    job.updatedAt = new Date().toISOString();
+    writeJobs(jobs);
     res.status(error.status || 502).json({
       error: error.message || "AI scene images generate नहीं हो पाईं।",
-      generatedImages: results.length
+      generatedImages: results.length,
+      cloudflareErrorCode: error.cloudflareErrorCode || null,
+      retryAfterSeconds: error.retryAfterSeconds ?? null,
+      cfRay: error.cfRay || null,
+      job,
+      sceneImages: savedImages,
+      visualPlan
     });
   }
 });
@@ -742,6 +1054,7 @@ app.post("/api/jobs/:id/generate-scene-images", async (req, res) => {
 app.post("/api/jobs/:id/convert-to-devanagari", async (req, res) => {
   const { jobs, job } = findJob(req.params.id);
   if (!job) return res.status(404).json({ error: "Video brief not found." });
+  const subtitleSegmentRange = Number(job.duration) <= 15 ? "2 or 3" : "3 or 4";
 
   const original = job.scriptData || {
     title: job.topic,
@@ -769,10 +1082,17 @@ app.post("/api/jobs/:id/convert-to-devanagari", async (req, res) => {
             duration_sec: { type: "integer" },
             dialogue: { type: "string" },
             visual_direction: { type: "string" },
+            shot_type: { type: "string" },
+            camera_movement: { type: "string" },
+            transition: { type: "string" },
+            audio_cue: { type: "string" },
             subtitle: { type: "string" },
             subtitle_segments: { type: "array", items: { type: "string" } }
           },
-          required: ["duration_sec", "dialogue", "visual_direction", "subtitle"]
+          required: [
+            "duration_sec", "dialogue", "visual_direction", "shot_type",
+            "camera_movement", "transition", "audio_cue", "subtitle", "subtitle_segments"
+          ]
         }
       },
       cta: { type: "string" },
@@ -791,6 +1111,9 @@ app.post("/api/jobs/:id/convert-to-devanagari", async (req, res) => {
         "If a scene has no subtitle_segments, create 3 or 4 short sequential Devanagari captions from its dialogue. Do not add new claims.",
         "Do not return Roman Hindi. Keep a few genuinely English words/acronyms only when natural, such as AI or PLR. Convert Hindi words such as man, aap, kya, jaante, shakti, pehchanein into मन, आप, क्या, जानते, शक्ति, पहचानें.",
         "Keep visual_direction exactly as supplied; it is an internal prompt and may remain in English.",
+        "Preserve each scene's existing shot_type, camera_movement, transition and audio_cue exactly where present. These are internal production notes and should remain concise English where originally written.",
+        "If any production note is missing in an older script, fill only that missing note with a simple practical choice based on visual_direction; do not change notes that already exist.",
+        "Keep scene order, scene count and each duration_sec unchanged. Return " + subtitleSegmentRange + " non-empty subtitle_segments for every scene.",
         "Return only valid JSON matching this schema: " + JSON.stringify(schema),
         "EXISTING SCRIPT:",
         JSON.stringify(original)
@@ -810,6 +1133,8 @@ app.post("/api/jobs/:id/convert-to-devanagari", async (req, res) => {
       return res.status(502).json({ error: "Conversion में जरूरी script fields नहीं मिले।" });
     }
 
+    corrected.scenes = preserveSceneProductionFields(corrected.scenes, original.scenes);
+
     const issues = devanagariIssues(corrected);
     if (issues.length) {
       return res.status(422).json({
@@ -817,9 +1142,18 @@ app.post("/api/jobs/:id/convert-to-devanagari", async (req, res) => {
       });
     }
 
+    const productionIssues = validateScriptData(corrected, job.duration);
+    if (productionIssues.length) {
+      return res.status(422).json({
+        error: "Converted script का production check पास नहीं हुआ: " + productionIssues.slice(0, 5).join(" ")
+      });
+    }
+
     job.scriptData = corrected;
+    job.visualPlan = getVideoVisualPlan(job.duration, corrected.scenes.length);
     job.script = corrected.voiceover;
     job.voiceFile = "";
+    job.platformCopy = null;
     if (job.status === "approved" || job.status === "exported" || job.status === "published") {
       job.status = "review";
     } else {
@@ -954,12 +1288,21 @@ app.post("/api/jobs/:id/generate-voice", async (req, res) => {
       voiceModeLabel = "Blended voices · " + femaleVoice + " + " + maleVoice;
     }
 
+    const audioDurationSec = pcm.length / (24000 * 2);
+    const targetDurationSec = Number(job.duration || 45);
+    const durationToleranceSec = Math.max(2, targetDurationSec * 0.08);
+    const durationMatchesTarget =
+      audioDurationSec >= targetDurationSec - durationToleranceSec &&
+      audioDurationSec <= targetDurationSec + 0.05;
     const wav = pcmToWav(pcm, 24000);
     const safeFile = job.id + ".wav";
     fs.writeFileSync(path.join(OUTPUT_DIR, safeFile), wav);
     job.script = narration;
     if (job.scriptData) job.scriptData.voiceover = narration;
     job.voiceFile = "/outputs/" + safeFile;
+    resetBufferApprovalIfContentChanged(job);
+    job.voiceDurationSec = Number(audioDurationSec.toFixed(2));
+    job.voiceDurationMatchesTarget = durationMatchesTarget;
     job.voiceMode = voiceMode;
     job.femaleVoice = femaleVoice;
     job.maleVoice = maleVoice;
@@ -971,7 +1314,11 @@ app.post("/api/jobs/:id/generate-voice", async (req, res) => {
       voiceFile: job.voiceFile,
       mimeType: "audio/wav",
       voiceMode: job.voiceMode,
-      voiceModeLabel
+      voiceModeLabel,
+      audioDurationSec: job.voiceDurationSec,
+      targetDurationSec: job.duration,
+      durationMatchesTarget,
+      job
     });
   } catch (error) {
     res.status(error.status || 502).json({
@@ -1002,93 +1349,71 @@ app.patch("/api/jobs/:id", (req, res) => {
   const jobs = readJobs();
   const job = jobs.find(item => item.id === req.params.id);
   if (!job) return res.status(404).json({ error: "Job not found." });
+  const previousReviewContent = JSON.stringify({
+    script: job.script,
+    scriptData: job.scriptData,
+    platformCopy: job.platformCopy,
+    sceneImages: job.sceneImages,
+    voiceFile: job.voiceFile
+  });
+  const previousVoiceover = String(job.scriptData?.voiceover || job.script || "");
+  const previousVisualPlan = JSON.stringify((job.scriptData?.scenes || []).map(scene =>
+    [scene.visual_direction, scene.shot_type]
+  ));
 
   for (const [key, value] of Object.entries(req.body || {})) {
     if (allowedStrings.has(key) && typeof value === "string") job[key] = value.slice(0, 30000);
+  }
+  if (req.body?.platformCopy === null) {
+    job.platformCopy = null;
+  } else if (req.body?.platformCopy && typeof req.body.platformCopy === "object" && !Array.isArray(req.body.platformCopy)) {
+    const copy = {};
+    for (const key of ["facebookCaption", "instagramCaption", "youtubeTitle", "youtubeDescription"]) {
+      const value = req.body.platformCopy[key];
+      if (typeof value === "string") copy[key] = value.slice(0, key === "youtubeTitle" ? 100 : 5000);
+    }
+    job.platformCopy = copy;
   }
   if (["female", "male", "duet", "mix"].includes(req.body?.voiceMode)) job.voiceMode = req.body.voiceMode;
   if (FEMALE_TTS_VOICES.has(req.body?.femaleVoice)) job.femaleVoice = req.body.femaleVoice;
   if (MALE_TTS_VOICES.has(req.body?.maleVoice)) job.maleVoice = req.body.maleVoice;
   if (req.body?.scriptData && typeof req.body.scriptData === "object" && !Array.isArray(req.body.scriptData)) {
+    const nextVoiceover = typeof req.body.scriptData.voiceover === "string"
+      ? req.body.scriptData.voiceover.slice(0, 30000)
+      : previousVoiceover;
+    const nextVisualPlan = JSON.stringify((req.body.scriptData.scenes || []).map(scene =>
+      [scene.visual_direction, scene.shot_type]
+    ));
+    if (nextVoiceover !== previousVoiceover) {
+      if (job.voiceFile) fs.rmSync(path.join(OUTPUT_DIR, path.basename(job.voiceFile)), { force: true });
+      job.voiceFile = "";
+      job.voiceDurationSec = null;
+      job.voiceDurationMatchesTarget = null;
+    }
+    if (nextVisualPlan !== previousVisualPlan) {
+      for (const image of job.sceneImages || []) {
+        const fileName = path.basename(String(image.url || ""));
+        if (fileName.startsWith(job.id + "-scene-")) fs.rmSync(path.join(OUTPUT_DIR, fileName), { force: true });
+      }
+      job.sceneImages = [];
+    }
     job.scriptData = req.body.scriptData;
-    if (typeof req.body.scriptData.voiceover === "string") job.script = req.body.scriptData.voiceover.slice(0, 30000);
+    if (typeof req.body.scriptData.voiceover === "string") job.script = nextVoiceover;
   }
+  if (job.scriptData?.scenes?.length) {
+    job.visualPlan = getVideoVisualPlan(job.duration, job.scriptData.scenes.length);
+  }
+  const nextReviewContent = JSON.stringify({
+    script: job.script,
+    scriptData: job.scriptData,
+    platformCopy: job.platformCopy,
+    sceneImages: job.sceneImages,
+    voiceFile: job.voiceFile
+  });
+  if (nextReviewContent !== previousReviewContent) resetBufferApprovalIfContentChanged(job);
   job.updatedAt = new Date().toISOString();
   writeJobs(jobs);
   res.json(job);
-});
-
-app.get("/api/buffer/status", async (_req, res) => {
-  if (!BUFFER_API_KEY) {
-    return res.json({
-      configured: false,
-      connected: false,
-      message: "Buffer API key अभी local .env में configured नहीं है।"
-    });
-  }
-
-  try {
-    const accountData = await bufferGraphQL(`
-      query {
-        account {
-          organizations {
-            id
-            name
-          }
-        }
-      }
-    `);
-
-    const organizations = Array.isArray(accountData?.account?.organizations)
-      ? accountData.account.organizations
-      : [];
-
-    const organizationsWithChannels = await Promise.all(organizations.map(async organization => {
-      const channelData = await bufferGraphQL(`
-        query {
-          channels(input: { organizationId: ${JSON.stringify(organization.id)} }) {
-            id
-            name
-            service
-            descriptor
-            displayName
-            isDisconnected
-            isQueuePaused
-          }
-        }
-      `);
-      return {
-        id: organization.id,
-        name: organization.name,
-        channels: Array.isArray(channelData?.channels) ? channelData.channels : []
-      };
-    }));
-
-    const channels = organizationsWithChannels.flatMap(organization =>
-      organization.channels.map(channel => ({
-        id: channel.id,
-        name: channel.displayName || channel.name,
-        service: channel.service,
-        descriptor: channel.descriptor,
-        isDisconnected: Boolean(channel.isDisconnected),
-        isQueuePaused: Boolean(channel.isQueuePaused),
-        organizationName: organization.name
-      }))
-    );
-
-    res.json({
-      configured: true,
-      connected: true,
-      organizations: organizationsWithChannels.map(({ id, name }) => ({ id, name })),
-      channels
-    });
-  } catch (error) {
-    res.status(error.status || 502).json({
-      configured: true,
-      connected: false,
-      error: error.message || "Buffer connection check नहीं हो पाया।"
-    });
-  }
 });
 
 app.listen(PORT, "0.0.0.0", () => {
