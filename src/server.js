@@ -497,7 +497,11 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
           properties: {
             duration_sec: { type: "integer" },
             dialogue: { type: "string", description: "Presenter dialogue in Devanagari Hindi, never Roman Hindi." },
-            visual_direction: { type: "string", description: "Internal visual-production prompt. English is allowed here; this text is not spoken and is not shown as a subtitle." },
+            visual_direction: { type: "string", description: "Internal visual-production prompt. English is allowed here; describe subject, setting, lighting, composition and action." },
+            shot_type: { type: "string", description: "Choose a clear framing such as close-up, medium shot, wide shot, overhead or detail shot." },
+            camera_movement: { type: "string", description: "Choose a practical movement such as static, slow push-in, pan, tilt or tracking; avoid complex impossible moves." },
+            transition: { type: "string", description: "Describe a simple edit transition into the next scene, such as hard cut, dissolve, match cut or whip pan." },
+            audio_cue: { type: "string", description: "Short music or sound-effect cue that supports the scene without competing with Hindi dialogue." },
             subtitle: { type: "string", description: "A short central idea subtitle in Devanagari Hindi." },
             subtitle_segments: {
               type: "array",
@@ -505,7 +509,7 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
               items: { type: "string" }
             }
           },
-          required: ["duration_sec", "dialogue", "visual_direction", "subtitle", "subtitle_segments"]
+          required: ["duration_sec", "dialogue", "visual_direction", "shot_type", "camera_movement", "transition", "audio_cue", "subtitle", "subtitle_segments"]
         }
       },
       cta: { type: "string", description: "A short spoken call-to-action in Devanagari Hindi." },
@@ -531,7 +535,8 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
     "- Warm, grounded Indian Hindi voice. Use everyday language, not stiff translated Hindi.",
     "- Make the voiceover fit the selected duration.",
     "- Write a strong hook for the first 2–3 seconds.",
-    "- Provide exactly 3 concise scenes. Each scene must include dialogue in Devanagari Hindi, a short subtitle in Devanagari Hindi, 3 or 4 sequential subtitle_segments in Devanagari Hindi, and a practical visual direction.",
+    "- Provide exactly 3 concise scenes. Each scene must include dialogue in Devanagari Hindi, a short subtitle in Devanagari Hindi, 3 or 4 sequential subtitle_segments in Devanagari Hindi, and a practical visual direction.
+    - For every scene, specify shot_type, camera_movement, transition and audio_cue. Use simple production choices that can be executed in a lightweight vertical-video editor.",
     "- Each subtitle segment should be a natural spoken phrase of about 3–7 words. Keep the segments in the same order as the dialogue so they can appear one after another during that scene.",
     "- Do not put Scene 1, Scene 2, Scene 3, scene numbers, headings or labels in dialogue or subtitles.",
     "- Visual directions are internal production prompts, not audience copy. They may be written in clear English so future image/video models can understand them.",
