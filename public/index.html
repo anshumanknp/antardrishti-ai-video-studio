@@ -1216,12 +1216,15 @@
 
   function refreshBufferPublishControls() {
     const approved = activeJob?.status === "approved";
+    const savedCopy = isCurrentPlatformCopySaved();
     const hasChannel = Boolean(document.getElementById("bufferChannelSelect").value);
     const hasVideoUrl = Boolean(document.getElementById("bufferVideoUrl").value.trim());
-    document.getElementById("sendToBufferBtn").disabled = !(approved && hasChannel && hasVideoUrl);
-    document.getElementById("bufferApprovalNote").textContent = approved
-      ? "यह video Approved है। सही platform copy और public HTTPS video URL जाँचकर Queue में भेजें।"
-      : "Publishing बंद है। पहले final video और captions जाँचें, फिर dashboard में इस job का status Approved करें।";
+    document.getElementById("sendToBufferBtn").disabled = !(approved && savedCopy && hasChannel && hasVideoUrl);
+    document.getElementById("bufferApprovalNote").textContent = !approved
+      ? "Publishing बंद है। पहले final video और captions जाँचें, फिर dashboard में इस job का status Approved करें।"
+      : !savedCopy
+        ? "Platform copy में unsaved बदलाव हैं। Save Social Copy करें; content बदलने पर job को दोबारा Approved करना होगा।"
+        : "यह video और saved platform copy Approved हैं। सही public HTTPS video URL जाँचकर Queue में भेजें।";
   }
 
   function isCurrentPlatformCopySaved() {
@@ -2122,6 +2125,9 @@
   document.getElementById("refreshBufferChannelsBtn").addEventListener("click", refreshBufferChannels);
   document.getElementById("bufferChannelSelect").addEventListener("change", refreshBufferPublishControls);
   document.getElementById("bufferVideoUrl").addEventListener("input", refreshBufferPublishControls);
+  ["facebookCaption", "instagramCaption", "youtubeTitle", "youtubeDescription"].forEach(id => {
+    document.getElementById(id).addEventListener("input", refreshBufferPublishControls);
+  });
   document.getElementById("sendToBufferBtn").addEventListener("click", sendVideoToBuffer);
   document.getElementById("reelsSafeAreaToggle").addEventListener("change", event => {
     document.getElementById("reelsSafeAreaOverlay").hidden = !event.target.checked;
