@@ -169,7 +169,7 @@
     .social-copy-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:12px; }
     .social-copy-card { min-width:0; padding:12px; background:#19273a; border:1px solid #30435d; border-radius:9px; }
     .social-copy-card h3 { margin:0 0 8px; color:#e6c78e; font-size:12px; }
-    .social-copy-card textarea { width:100%; min-height:145px; resize:vertical; padding:10px; color:var(--text); background:#0f1928; border:1px solid #34465e; border-radius:7px; font:11px/1.55 inherit; }
+    .social-copy-card textarea { width:100%; min-height:145px; resize:vertical; padding:10px; color:var(--text); background:#0f1928; border:1px solid #34465e; border-radius:7px; font:inherit; font-size:11px; line-height:1.55; }
     .social-copy-card .title-input { margin-bottom:8px; }
     .social-copy-actions { display:flex; flex-wrap:wrap; gap:7px; margin-top:8px; }
     .social-copy-note, .buffer-help { margin:7px 0; color:#9eafc4; font-size:10px; line-height:1.55; }
@@ -1143,7 +1143,7 @@
           '</option>'
         ).join("");
       select.disabled = channels.length === 0;
-      document.getElementById("sendToBufferBtn").disabled = channels.length === 0;
+      document.getElementById("sendToBufferBtn").disabled = true;
       setBufferStatus(channels.length ? "Connected · " + channels.length + " channels" : "No supported channels", channels.length > 0);
       document.getElementById("bufferSetupNote").textContent = channels.length
         ? "Connected to Buffer. Select the channel, paste a public video URL, then add it to the Queue."
@@ -1803,6 +1803,9 @@
   document.getElementById("copyYoutubeTitleBtn").addEventListener("click", () => copySocialField("youtubeTitle", "YouTube title"));
   document.getElementById("copyYoutubeDescriptionBtn").addEventListener("click", () => copySocialField("youtubeDescription", "YouTube description"));
   document.getElementById("refreshBufferChannelsBtn").addEventListener("click", refreshBufferChannels);
+  document.getElementById("bufferChannelSelect").addEventListener("change", () => {
+    document.getElementById("sendToBufferBtn").disabled = !document.getElementById("bufferChannelSelect").value;
+  });
   document.getElementById("sendToBufferBtn").addEventListener("click", sendVideoToBuffer);
   document.getElementById("generateScriptBtn").addEventListener("click", () => generateScript(false));
   document.getElementById("convertScriptBtn").addEventListener("click", convertCurrentScriptToDevanagari);
