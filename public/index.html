@@ -605,6 +605,8 @@
         <strong>Scene ${index + 1} · ${escapeHtml(scene.duration_sec || 0)} sec</strong>
         <p><b>Dialogue:</b> ${escapeHtml(scene.dialogue || "")}</p>
         <p><b>Visual:</b> ${escapeHtml(scene.visual_direction || "")}</p>
+        <p><b>Shot:</b> ${escapeHtml(scene.shot_type || "Not specified")} · <b>Camera:</b> ${escapeHtml(scene.camera_movement || "Not specified")}</p>
+        <p><b>Transition:</b> ${escapeHtml(scene.transition || "Not specified")} · <b>Audio:</b> ${escapeHtml(scene.audio_cue || "Not specified")}</p>
         <small>Subtitle: ${escapeHtml(scene.subtitle || "")}</small>
       </article>`).join("");
   }
