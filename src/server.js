@@ -66,6 +66,10 @@ app.use("/outputs", express.static(OUTPUT_DIR));
 
 function readJobs() { return readJobStore(JOBS_FILE); }
 function writeJobs(jobs) { return writeJobStore(JOBS_FILE, jobs); }
+function removeSavedRenderedVideo(job) {
+  if (!job?.renderedVideoFile) return;
+  fs.rmSync(path.join(OUTPUT_DIR, path.basename(job.renderedVideoFile)), { force: true });
+}
 
 function pcmToWav(pcm, sampleRate = 24000, channels = 1, bitsPerSample = 16) {
   const header = Buffer.alloc(44);
@@ -1082,6 +1086,7 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
         fs.rmSync(path.join(OUTPUT_DIR, fileName), { force: true });
       }
     }
+    removeSavedRenderedVideo(job);
     job.sceneImages = [];
     job.scriptData = scriptData;
     job.visualPlan = getVideoVisualPlan(job.duration, scriptData.scenes.length);
@@ -1090,6 +1095,7 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
     job.voiceDurationSec = null;
     job.voiceDurationMatchesTarget = null;
     job.platformCopy = null;
+    resetBufferApprovalIfContentChanged(job, { invalidateRenderedVideo: true });
     job.status = "script_ready";
     job.updatedAt = new Date().toISOString();
     writeJobs(jobs);
@@ -1212,6 +1218,7 @@ app.post("/api/jobs/:id/generate-scene-images", async (req, res) => {
         savedImages.push(item);
       }
       job.sceneImages = savedImages;
+      removeSavedRenderedVideo(job);
       resetBufferApprovalIfContentChanged(job, { invalidateRenderedVideo: true });
       job.updatedAt = new Date().toISOString();
       writeJobs(jobs);
@@ -1496,6 +1503,7 @@ app.post("/api/jobs/:id/generate-voice", async (req, res) => {
     job.script = narration;
     if (job.scriptData) job.scriptData.voiceover = narration;
     job.voiceFile = "/outputs/" + safeFile;
+    removeSavedRenderedVideo(job);
     resetBufferApprovalIfContentChanged(job, { invalidateRenderedVideo: true });
     job.voiceDurationSec = Number(audioDurationSec.toFixed(2));
     job.voiceDurationMatchesTarget = durationMatchesTarget;
@@ -1557,6 +1565,7 @@ app.patch("/api/jobs/:id", (req, res) => {
   });
   const previousVoiceover = String(job.scriptData?.voiceover || job.script || "");
   const previousVideoSource = JSON.stringify({ script: job.script, scriptData: job.scriptData, sceneImages: job.sceneImages, voiceFile: job.voiceFile });
+  const previousRenderedVideoFile = job.renderedVideoFile;
   const previousVisualPlan = JSON.stringify((job.scriptData?.scenes || []).map(scene =>
     [scene.visual_direction, scene.shot_type]
   ));
@@ -1612,7 +1621,9 @@ app.patch("/api/jobs/:id", (req, res) => {
     voiceFile: job.voiceFile
   });
   if (nextReviewContent !== previousReviewContent) {
-    resetBufferApprovalIfContentChanged(job, { invalidateRenderedVideo: nextVideoSource !== previousVideoSource });
+    const videoSourceChanged = nextVideoSource !== previousVideoSource;
+    if (videoSourceChanged) removeSavedRenderedVideo({ renderedVideoFile: previousRenderedVideoFile });
+    resetBufferApprovalIfContentChanged(job, { invalidateRenderedVideo: videoSourceChanged });
   }
   job.updatedAt = new Date().toISOString();
   writeJobs(jobs);
