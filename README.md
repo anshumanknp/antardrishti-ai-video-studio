@@ -5,7 +5,7 @@ A separate, local-first workspace for planning and tracking Antardrishti short-v
 ## Product brief
 
 - 30 short videos per month
-- 30–60 seconds, vertical 9:16
+- Selectable video lengths: 15, 30, 45 or 60 seconds, vertical 9:16
 - Hindi-first language mix: about 90% Hindi and 10% English
 - Natural Indian Hindi voice target
 - Mixed format: AI presenter combined with cinematic generated visuals
@@ -49,16 +49,27 @@ Female voice choices: Kore, Aoede, Leda, Zephyr and Gacrux. Male voice choices: 
 - Open Script Studio and go to **Brand logo**.
 - Choose a PNG, JPG or WebP image up to 1.5 MB, then select **Upload / Replace Logo**.
 - A transparent PNG is recommended. The logo is saved locally in the project's `outputs/` folder and reused on future videos from this Studio.
-- The renderer places the logo in the top-right corner of every slide. Use a compact, horizontal logo with a transparent background for the cleanest result.
+- The renderer places the logo at the top-right inside the Reels-safe area. The logo is larger than the original starter layout. Use a compact, horizontal logo with a transparent background for the cleanest result.
 - Use **Remove Logo** to delete the saved logo. The logo is separate from generated AI scene art, so it stays sharp and does not get distorted by the image model.
 
-AI scene-image prompts explicitly ask for no words, lettering, numbers, labels, scene names or logos. The video renderer adds the scene caption and brand logo after the background image is generated. Existing scene images made with older prompts may still have unwanted lettering; use **Generate / Refresh Scene Images (Free API)** once to replace them.
+AI scene-image prompts explicitly ask for no words, lettering, numbers, labels, scene names or logos. The video renderer adds the scene caption and brand logo after the background image is generated. Existing scene images made with older prompts may still have unwanted lettering; use **Generate Missing AI Images** once to replace them.
+
+### Scene production plan
+
+Each generated scene now carries a production brief alongside its Hindi dialogue and captions:
+
+- **Shot type:** framing such as close-up, medium shot or wide shot.
+- **Camera movement:** a practical move such as static, slow push-in, pan or tracking.
+- **Transition:** the edit into the next scene, using a simple cut, dissolve or match cut.
+- **Audio cue:** a short music or sound-effect direction that stays behind the narration.
+
+The server validates these fields before accepting a generated script. The image prompt uses the requested shot type, and the browser renderer applies simulated push-in, pull-out, pan and tilt moves to generated stills. A dissolve/cross-fade is applied when that transition is requested; hard cuts remain immediate. These are still-image camera effects, not real camera footage or character movement. Audio cues remain production notes; this version does not generate a separate music or sound-effect track.
 
 ### Video and subtitles
 
-The current video builder uses animated gradients for title cards and generated scene artwork with a slow Ken Burns motion. It starts the narration from the opening hook, overlays the uploaded brand logo, displays short sequential Hindi caption segments in each scene, and creates a matching scene-timed Hindi `.srt` file. It can export MP4 or WebM depending on browser support. The scene caption timings are distributed evenly within their scene; they are not word-level forced alignment.
+The current video builder uses animated gradient title cards and generated scene artwork. It starts narration at the opening, overlays the uploaded logo, shows each scene's main subtitle and its sequential Hindi caption segments (2–3 segments per scene for 15-second videos; 3–4 for longer videos), and creates a scene-timed Hindi `.srt` file. Shot framing and supported camera moves affect the rendered image. Content, logo and progress indicator stay inside a central Reels-safe region; the video preview has an optional Instagram UI/safe-area guide. The guide is preview-only and is not exported. MP4 or WebM output depends on browser support. Caption segments are timed evenly within each scene, not word-level forced alignment.
 
-The Studio can generate one AI image for each of the three scenes using Cloudflare Workers AI's free allocation, then use those images as full-bleed video backgrounds. It uses the `@cf/black-forest-labs/flux-1-schnell` model. Cloudflare's Free Workers plan includes 10,000 AI Neurons per day, shared across the account. The Studio adds its own hard limit of 100 generated images per UTC day and has no paid image-provider fallback. Visual directions are used as image prompts and are not printed as text over the scenes. AI presenter footage and generated cinematic video clips are separate future integrations.
+The Studio uses a duration-based visual plan rather than generating a single image per scene. The current plan is 5 visual shots / 4 AI images for 15 seconds, 8 / 6 for 30 seconds, 10 / 8 for 45 seconds and 13 / 10 for 60 seconds. Extra visual shots reuse an existing scene image with a different crop and simulated camera move, so they do not trigger another image request. Only missing planned images are generated. The gallery also has a per-image regenerate action; it replaces only that selected image. The `@cf/black-forest-labs/flux-1-schnell` model creates square stills that the renderer crops to 9:16. Cloudflare's 10,000 AI Neurons/day Free allocation is shared across the account. The Studio applies a separate safety cap of 30 image requests per UTC day; this app cap is not a measurement of Cloudflare Neurons. There is no paid image-provider fallback. AI presenter footage and real generated cinematic video clips remain separate future integrations.
 
 ### One-click automation
 
@@ -70,7 +81,34 @@ After Cloudflare is configured, open a video job and press **Auto Create Video (
 4. Generate missing scene images through Cloudflare Workers AI. Existing images are reused.
 5. Render the vertical video with the voice, scene images and Hindi subtitles, then prepare the separate SRT download.
 
-The automation stops on an API or quota error and shows the failed step. It does not fall back to a paid provider. You still review the final video and decide when to publish it.
+The script generator treats the selected 15/30/45/60-second length as a target and uses duration-specific narration word ranges and scene counts. After TTS, the Studio measures the actual voice duration. When a voice file exists, the renderer sets the final video length from the decoded narration duration (plus a short 0.15-second audio tail) and scales the intro, scene and outro timings to fit it. For example, a 13.8-second voice produces a video of about 14 seconds even when the selected target was 15 seconds; a slightly longer voice is also allowed to finish without being cut off. If no voice file exists, the renderer falls back to the selected duration. The automation still stops on an API or quota error and shows the failed step. It does not fall back to a paid provider. You still review the final video and decide when to publish it.
+
+### Social media copy and Buffer queue
+
+After a Hindi script is ready, open Script Studio and select **Generate Captions & Titles**. The Studio creates and saves separate copy for:
+- Facebook caption with opening hook and hashtags
+- Instagram Reel caption with opening hook and hashtags
+- YouTube Shorts title and description with hashtags
+
+Each field can be edited and copied independently. Script regeneration or Devanagari conversion clears the old social copy so it cannot accidentally be used with a different script.
+
+#### Connect Buffer
+
+1. In Buffer, open **Settings → API** and create a personal API key.
+2. Put the key in your local `.env` file as `BUFFER_API_KEY=your_key`.
+3. Keep the key private and never commit `.env` to GitHub.
+4. Restart the Studio with `npm start`.
+5. Open Script Studio and select **Connect / Refresh Buffer**. The app reads your Buffer organizations and connected Facebook, Instagram and YouTube channels.
+6. Review the final video and all three platform-copy fields. In the main dashboard, change the job status to **Approved** only after that review.
+7. In Script Studio, select a channel, provide a direct public HTTPS URL for the finished video, and select **Add Video to Buffer Queue**.
+
+The server rejects Buffer queue requests unless the job status is exactly **Approved**. Editing the script, platform copy, voice or scene images after approval returns an approved/exported job to **Needs review**. The Studio records successful Buffer queue posts against the job and blocks the same video URL from being queued twice to the same channel. One video can still be queued to different channels. A successful queue action means Buffer accepted the scheduled post; it does not mean the post has already published.
+
+The Buffer API is available on Buffer Free and paid plans. The current Free plan allows 1 API key, up to 150 requests per 15 minutes, 600 per 24 hours, and 1,000 per connected channel over 30 days (up to 3,000 total). Limits are shared by API keys and MCP connections and may change; see the [official rate limits](https://developers.buffer.com/guides/api-limits.html).
+
+**Video hosting requirement:** Buffer expects a video asset URL that is publicly accessible over HTTPS and remains available until the scheduled post publishes. A local `localhost` URL or a private Google Drive/Dropbox share link will not work. Cloudinary or a public Cloudflare R2 bucket can provide a suitable URL. The current integration accepts that URL in Script Studio; it does not upload the local video file to a host automatically. See Buffer's [media hosting guide](https://developers.buffer.com/guides/hosting-media.html).
+
+The Buffer integration adds Reels to the Facebook and Instagram queues, and a YouTube video post with a separate title and description. YouTube is set to Public and Education category by default. The AI-generated disclosure option is enabled by default for platforms that support it. Review every queued post in Buffer before its scheduled time.
 
 ### Configure Cloudflare free image generation
 
@@ -99,31 +137,13 @@ Keep the token private. Do not paste it into chat or commit it to GitHub. The im
 - Duet uses Gemini's two-speaker TTS configuration.
 - Blend makes two TTS requests and mixes their PCM audio into one WAV.
 
-TTS requests can take longer than script generation. Blend uses about twice the TTS generation requests of a single voice. Cloudflare Workers AI's Free plan currently includes 10,000 Neurons per day, shared with other Workers AI usage in the same account. The Studio applies a conservative cap of 100 scene-image requests per UTC day and does not automatically switch to a paid image API. When the Cloudflare daily quota is exhausted, image generation stops until the quota resets. Check Cloudflare's current pricing and dashboard usage before production use. Gemini text and TTS free-tier access is also subject to quotas and can change. Do not send private client or therapy information to either API.
+TTS requests can take longer than script generation. Blend uses about twice the TTS generation requests of a single voice. Cloudflare Workers AI's Free plan currently includes 10,000 Neurons per day, shared with other Workers AI usage in the same account. The Studio applies its own safety cap of 30 image requests per UTC day and does not automatically switch to a paid image API. When the Cloudflare daily quota is exhausted, image generation stops until the quota resets. Check Cloudflare's current pricing and dashboard usage before production use. Gemini text and TTS free-tier access is also subject to quotas and can change. Do not send private client or therapy information to either API.
 
-### Enable paid scene images (optional)
+### Image provider and quota controls
 
-Leave these settings in the local `.env` file to keep image generation off:
+Scene images use Cloudflare Workers AI FLUX Schnell when `CLOUDFLARE_IMAGE_ENABLED=true` and the local `.env` contains a valid Cloudflare Account ID and API token. Keep the flag set to `false` to disable image generation. The Studio does not call a paid image fallback.
 
-```env
-GEMINI_IMAGE_ENABLED=false
-GEMINI_IMAGE_MODEL=gemini-3.1-flash-lite-image
-```
-
-Only when you explicitly decide to use paid image generation, change the first setting to `true` and restart the server. The **Generate AI Scene Images (Paid)** button then becomes available. It asks for confirmation before generating images. The server stores generated scene images in `outputs/`, reuses existing images unless a full refresh is confirmed, and deletes them when the related video job is deleted.
-
-## Buffer connection check
-
-The dashboard includes a server-side Buffer API connection check. To enable it:
-
-1. Add your Buffer key to the local `.env` file as `BUFFER_API_KEY=your_key`.
-2. Save the file and restart the app with `npm start`.
-3. Open the dashboard and select **Check Buffer connection**.
-4. The dashboard will show the Buffer organizations and connected channels. This check is read-only; it does not create or publish posts.
-
-Keep the real key out of GitHub and browser code. The repository is public, and `.env` is ignored by Git.
-
-**Video publishing is not connected yet.** Buffer requires each video asset URL to be publicly reachable over HTTPS. Files stored only in the local `outputs/` folder cannot be fetched by Buffer. The next publishing step needs stable public media hosting, then a reviewed queue/scheduling action for the selected Buffer channel.
+The image gallery generates only missing planned assets and offers a separate **Regenerate this image** action for one selected asset. The application has its own safety cap of 30 successful image requests per UTC day. This is separate from Cloudflare's account-wide Neurons allocation and does not predict or measure Neuron consumption.
 
 ## Requirements
 
