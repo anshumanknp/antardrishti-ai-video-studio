@@ -160,7 +160,7 @@ Keep the token private. Do not paste it into chat or commit it to GitHub. The im
 
 ## API models and usage
 
-- Script and Duet dialogue: `gemini-3.1-flash-lite` (the server can try `gemini-3.5-flash-lite` after a temporary overload).
+- Script, Duet dialogue and social copy: `gemini-3.8-flash` (the server automatically tries `gemini-3.1-flash-lite` and `gemini-3.5-flash-lite` when a temporary capacity error occurs).
 - Hindi narration: `gemini-3.1-flash-tts-preview` (Standard free tier).
 - Optional scene images: Cloudflare Workers AI `@cf/black-forest-labs/flux-1-schnell` (free allocation; requires a Cloudflare Account ID and Workers AI API token).
 - Duet uses Gemini's two-speaker TTS configuration.
