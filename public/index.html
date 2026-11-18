@@ -558,6 +558,8 @@
             <button class="primary-btn" id="sendToBufferBtn" type="button" disabled>Add Video to Buffer Queue</button>
           </div>
           <p class="buffer-help" id="bufferSetupNote">Buffer API key को project की local .env file में BUFFER_API_KEY= के बाद रखें। API key chat या GitHub में share न करें।</p>
+          <p class="buffer-help" id="bufferApprovalNote">Publishing तभी खुलेगी जब dashboard में इस video का status Approved होगा।</p>
+          <div class="buffer-help" id="bufferQueueHistory" aria-live="polite">इस video के लिए अभी Buffer Queue history नहीं है।</div>
           <p class="buffer-result" id="bufferResult" role="status"></p>
         </section>
 
@@ -580,7 +582,7 @@
         <p class="privacy-note">Free-tier AI requests are sent to Google. Do not include client names, private therapy notes or other sensitive personal information. Generated scripts need your review before publication.</p>
       </div>
     </dialog>
-    <p class="footer-note">यह dashboard अभी video briefs और production status manage करता है। Actual AI script, presenter, voice, cinematic clips, subtitles और MP4 rendering अगले development चरण में जोड़े जाएँगे। Final publishing से पहले आपकी approval रहेगी।</p>
+    <p class="footer-note">यह dashboard video briefs और production status manage करता है। Script Studio में Hindi script, voice, scene images, subtitles और browser-based video rendering उपलब्ध हैं। Buffer Queue में post भेजने से पहले dashboard में status Approved होना जरूरी है।</p>
   </main>
 </div>
 
@@ -1196,6 +1198,32 @@
       : "Social copy अभी generate नहीं हुई है।";
   }
 
+  function renderBufferQueueHistory(job) {
+    const host = document.getElementById("bufferQueueHistory");
+    const entries = Array.isArray(job?.bufferQueuedPosts) ? job.bufferQueuedPosts : [];
+    if (!entries.length) {
+      host.textContent = "इस video के लिए अभी Buffer Queue history नहीं है।";
+      return;
+    }
+    host.innerHTML = "<strong>Buffer Queue history</strong><ul>" + entries.slice().reverse().map(entry => {
+      const platform = String(entry.platform || "").toUpperCase();
+      const channel = escapeHtml(entry.channelName || platform || "Buffer channel");
+      const due = entry.dueAt ? " · " + escapeHtml(new Date(entry.dueAt).toLocaleString("en-IN")) : "";
+      const postId = escapeHtml(entry.postId || "");
+      return "<li>" + escapeHtml(platform) + " · " + channel + due + (postId ? " · Post ID " + postId : "") + "</li>";
+    }).join("") + "</ul>";
+  }
+
+  function refreshBufferPublishControls() {
+    const approved = activeJob?.status === "approved";
+    const hasChannel = Boolean(document.getElementById("bufferChannelSelect").value);
+    const hasVideoUrl = Boolean(document.getElementById("bufferVideoUrl").value.trim());
+    document.getElementById("sendToBufferBtn").disabled = !(approved && hasChannel && hasVideoUrl);
+    document.getElementById("bufferApprovalNote").textContent = approved
+      ? "यह video Approved है। सही platform copy और public HTTPS video URL जाँचकर Queue में भेजें।"
+      : "Publishing बंद है। पहले final video और captions जाँचें, फिर dashboard में इस job का status Approved करें।";
+  }
+
   async function copySocialField(fieldId, label) {
     const value = document.getElementById(fieldId).value.trim();
     if (!value) {
@@ -1317,6 +1345,7 @@
     } finally {
       button.disabled = false;
       button.textContent = "Connect / Refresh Buffer";
+      refreshBufferPublishControls();
     }
   }
 
@@ -1327,6 +1356,12 @@
     const platformCopy = readPlatformCopyFromFields();
     const resultHost = document.getElementById("bufferResult");
     const button = document.getElementById("sendToBufferBtn");
+    if (!activeJob || activeJob.status !== "approved") {
+      resultHost.textContent = "पहले final video और captions review करें, फिर dashboard में status Approved करें।";
+      resultHost.classList.add("error");
+      refreshBufferPublishControls();
+      return;
+    }
     if (!channelId) {
       resultHost.textContent = "पहले Buffer channel चुनें।";
       resultHost.classList.add("error");
@@ -1357,12 +1392,18 @@
       const due = result.post?.dueAt ? " · " + new Date(result.post.dueAt).toLocaleString("en-IN") : "";
       resultHost.textContent = "Added to " + result.channelName + " Buffer Queue" + due + ".";
       resultHost.classList.remove("error");
+      if (result.job) {
+        activeJob = result.job;
+        renderBufferQueueHistory(activeJob);
+      }
+      document.getElementById("bufferVideoUrl").value = "";
+      refreshBufferPublishControls();
     } catch (error) {
       resultHost.textContent = error.message || "Buffer में post नहीं जा पाई।";
       resultHost.classList.add("error");
     } finally {
-      button.disabled = !document.getElementById("bufferChannelSelect").value;
       button.textContent = "Add Video to Buffer Queue";
+      refreshBufferPublishControls();
     }
   }
 
@@ -1375,6 +1416,8 @@
     document.getElementById("voiceoverText").value = activeScriptData?.voiceover || job.script || "";
     document.getElementById("scriptCta").value = activeScriptData?.cta || "";
     writePlatformCopyToFields(job.platformCopy);
+    renderBufferQueueHistory(job);
+    refreshBufferPublishControls();
     renderSceneImageGallery(job.sceneImages || []);
     updateImageGenerationControls();
     document.getElementById("voiceMode").value = job.voiceMode || "female";
@@ -2054,9 +2097,8 @@
   document.getElementById("copyYoutubeTitleBtn").addEventListener("click", () => copySocialField("youtubeTitle", "YouTube title"));
   document.getElementById("copyYoutubeDescriptionBtn").addEventListener("click", () => copySocialField("youtubeDescription", "YouTube description"));
   document.getElementById("refreshBufferChannelsBtn").addEventListener("click", refreshBufferChannels);
-  document.getElementById("bufferChannelSelect").addEventListener("change", () => {
-    document.getElementById("sendToBufferBtn").disabled = !document.getElementById("bufferChannelSelect").value;
-  });
+  document.getElementById("bufferChannelSelect").addEventListener("change", refreshBufferPublishControls);
+  document.getElementById("bufferVideoUrl").addEventListener("input", refreshBufferPublishControls);
   document.getElementById("sendToBufferBtn").addEventListener("click", sendVideoToBuffer);
   document.getElementById("reelsSafeAreaToggle").addEventListener("change", event => {
     document.getElementById("reelsSafeAreaOverlay").hidden = !event.target.checked;
