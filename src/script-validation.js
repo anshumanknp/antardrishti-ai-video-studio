@@ -46,3 +46,39 @@ export function validateScriptData(scriptData, expectedDuration) {
   }
   return issues;
 }
+
+const PRESERVED_SCENE_FIELDS = [
+  "duration_sec",
+  "visual_direction",
+  "shot_type",
+  "camera_movement",
+  "transition",
+  "audio_cue"
+];
+
+export function preserveSceneProductionFields(convertedScenes, originalScenes) {
+  if (!Array.isArray(convertedScenes)) return convertedScenes;
+
+  return convertedScenes.map((convertedScene, index) => {
+    if (!convertedScene || typeof convertedScene !== "object" || Array.isArray(convertedScene)) {
+      return convertedScene;
+    }
+
+    const originalScene = Array.isArray(originalScenes) ? originalScenes[index] : null;
+    if (!originalScene || typeof originalScene !== "object" || Array.isArray(originalScene)) {
+      return { ...convertedScene };
+    }
+
+    const result = { ...convertedScene };
+    for (const field of PRESERVED_SCENE_FIELDS) {
+      const originalValue = originalScene[field];
+      if (typeof originalValue === "string" && originalValue.trim()) {
+        result[field] = originalValue;
+      } else if (field === "duration_sec" &&
+                 Number.isInteger(originalValue) && originalValue > 0) {
+        result[field] = originalValue;
+      }
+    }
+    return result;
+  });
+}
