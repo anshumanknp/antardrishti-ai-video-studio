@@ -9,6 +9,7 @@ import { buildCloudflareScenePrompt } from "./image-prompt.js";
 import { getAlternateShotType, getVideoVisualPlan, getVisualImageTargets } from "./visual-plan.js";
 import { classifyCloudflareImageError } from "./cloudflare-errors.js";
 import { buildBufferVideoPostInput } from "./buffer-api.js";
+import { assertBufferPublishAllowed, recordBufferQueuePost, resetBufferApprovalIfContentChanged } from "./publishing-guard.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -506,6 +507,7 @@ app.post("/api/jobs/:id/generate-social-copy", async (req, res) => {
     }
 
     job.platformCopy = copy;
+    resetBufferApprovalIfContentChanged(job);
     job.updatedAt = new Date().toISOString();
     writeJobs(jobs);
     res.json({ ok: true, platformCopy: copy, job });
@@ -528,6 +530,7 @@ app.post("/api/jobs/:id/buffer/queue", async (req, res) => {
   if (!channelId) return res.status(400).json({ error: "Buffer channel चुनें।" });
 
   try {
+    const videoFingerprint = assertBufferPublishAllowed(job, { channelId, videoUrl });
     const bufferData = await fetchBufferOrganizationsAndChannels();
     const channel = bufferData.organizations
       .flatMap(organization => organization.channels)
@@ -556,12 +559,32 @@ app.post("/api/jobs/:id/buffer/queue", async (req, res) => {
     const action = result.createPost;
     if (action?.message) throw new Error(action.message);
     if (!action?.post?.id) throw new Error("Buffer ने post ID वापस नहीं किया।");
+    recordBufferQueuePost(job, {
+      videoFingerprint,
+      postId: action.post.id,
+      channelId: channel.id,
+      channelName: channel.name,
+      platform: channel.service,
+      dueAt: action.post.dueAt || null
+    });
+    if (platformCopy && typeof platformCopy === "object") {
+      const savedCopy = {};
+      for (const field of ["facebookCaption", "instagramCaption", "youtubeTitle", "youtubeDescription"]) {
+        if (typeof platformCopy[field] === "string") {
+          savedCopy[field] = platformCopy[field].trim().slice(0, field === "youtubeTitle" ? 100 : 5000);
+        }
+      }
+      job.platformCopy = savedCopy;
+    }
+    job.updatedAt = new Date().toISOString();
+    writeJobs(jobs);
     res.json({
       ok: true,
       queued: true,
       platform: channel.service,
       channelName: channel.name,
-      post: action.post
+      post: action.post,
+      job
     });
   } catch (error) {
     res.status(error.status || 502).json({
@@ -994,6 +1017,7 @@ app.post("/api/jobs/:id/generate-scene-images", async (req, res) => {
         savedImages.push(item);
       }
       job.sceneImages = savedImages;
+      resetBufferApprovalIfContentChanged(job);
       job.updatedAt = new Date().toISOString();
       writeJobs(jobs);
       results.push(item);
@@ -1277,6 +1301,7 @@ app.post("/api/jobs/:id/generate-voice", async (req, res) => {
     job.script = narration;
     if (job.scriptData) job.scriptData.voiceover = narration;
     job.voiceFile = "/outputs/" + safeFile;
+    resetBufferApprovalIfContentChanged(job);
     job.voiceDurationSec = Number(audioDurationSec.toFixed(2));
     job.voiceDurationMatchesTarget = durationMatchesTarget;
     job.voiceMode = voiceMode;
@@ -1324,6 +1349,13 @@ app.patch("/api/jobs/:id", (req, res) => {
   const jobs = readJobs();
   const job = jobs.find(item => item.id === req.params.id);
   if (!job) return res.status(404).json({ error: "Job not found." });
+  const previousReviewContent = JSON.stringify({
+    script: job.script,
+    scriptData: job.scriptData,
+    platformCopy: job.platformCopy,
+    sceneImages: job.sceneImages,
+    voiceFile: job.voiceFile
+  });
   const previousVoiceover = String(job.scriptData?.voiceover || job.script || "");
   const previousVisualPlan = JSON.stringify((job.scriptData?.scenes || []).map(scene =>
     [scene.visual_direction, scene.shot_type]
@@ -1371,6 +1403,14 @@ app.patch("/api/jobs/:id", (req, res) => {
   if (job.scriptData?.scenes?.length) {
     job.visualPlan = getVideoVisualPlan(job.duration, job.scriptData.scenes.length);
   }
+  const nextReviewContent = JSON.stringify({
+    script: job.script,
+    scriptData: job.scriptData,
+    platformCopy: job.platformCopy,
+    sceneImages: job.sceneImages,
+    voiceFile: job.voiceFile
+  });
+  if (nextReviewContent !== previousReviewContent) resetBufferApprovalIfContentChanged(job);
   job.updatedAt = new Date().toISOString();
   writeJobs(jobs);
   res.json(job);
