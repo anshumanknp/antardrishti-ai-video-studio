@@ -1306,15 +1306,25 @@
         voiceover: document.getElementById("voiceoverText").value.trim(),
         cta: document.getElementById("scriptCta").value.trim()
       };
+      const scriptChanged = !activeJob.scriptData ||
+        ["title", "hook", "voiceover", "cta"].some(key =>
+          String(activeJob.scriptData?.[key] || "") !== String(data[key] || "")
+        );
+      const patch = { scriptData: data, script: data.voiceover };
+      if (scriptChanged) patch.platformCopy = null;
       const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scriptData: data, script: data.voiceover })
+        body: JSON.stringify(patch)
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Script save नहीं हुई।");
       activeJob = result;
       activeScriptData = result.scriptData;
+      if (scriptChanged) {
+        writePlatformCopyToFields(null);
+        document.getElementById("socialCopyNote").textContent = "Script बदली है। नई platform copy generate करें।";
+      }
       await loadJobs();
       setStudioStatus("आपके script edits save हो गए।");
     } catch (error) {
