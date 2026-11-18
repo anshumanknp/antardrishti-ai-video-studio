@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import { readJobs as readJobStore, writeJobs as writeJobStore } from "./job-store.js";
+import { validateScriptData } from "./script-validation.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -602,6 +603,13 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
     if (languageIssues.length) {
       return res.status(422).json({
         error: "Script में कुछ Hindi text अभी भी Roman letters में है। Generate Script फिर दबाएँ। प्रभावित हिस्से: " + languageIssues.slice(0, 4).join(", ")
+      });
+    }
+
+    const scriptIssues = validateScriptData(scriptData, job.duration);
+    if (scriptIssues.length) {
+      return res.status(422).json({
+        error: "Generated script का production check पास नहीं हुआ: " + scriptIssues.slice(0, 5).join(" ")
       });
     }
 
