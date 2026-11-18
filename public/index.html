@@ -996,6 +996,17 @@
       if (!voiceResponse.ok) throw new Error(voiceResult.error || "Hindi voice generate नहीं हुई।");
       activeJob.voiceFile = voiceResult.voiceFile;
       activeJob.voiceModeLabel = voiceResult.voiceModeLabel;
+      activeJob.voiceDurationSec = voiceResult.audioDurationSec;
+      const targetVoiceDuration = Number(activeJob.duration || 45);
+      const voiceTolerance = Math.max(2, targetVoiceDuration * 0.08);
+      if (!Number.isFinite(Number(voiceResult.audioDurationSec)) ||
+          Math.abs(Number(voiceResult.audioDurationSec) - targetVoiceDuration) > voiceTolerance) {
+        throw new Error(
+          "Voiceover " + Number(voiceResult.audioDurationSec || 0).toFixed(1) +
+          " sec की बनी है, जबकि selected video " + targetVoiceDuration +
+          " sec का है। Voiceover को target duration के अनुसार edit करके Generate Hindi Voice दोबारा करें। Images बनाने से पहले duration ठीक करना जरूरी है।"
+        );
+      }
 
       const currentImages = Array.isArray(activeJob.sceneImages) ? activeJob.sceneImages : [];
       const expectedCount = (activeScriptData.scenes || []).length;
@@ -1420,10 +1431,18 @@
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Voice generation failed.");
       activeJob.voiceFile = result.voiceFile;
+      activeJob.voiceDurationSec = result.audioDurationSec;
+      activeJob.voiceDurationMatchesTarget = result.durationMatchesTarget;
       voicePlayer.src = result.voiceFile + "?v=" + Date.now();
       voicePlayer.hidden = false;
       await loadJobs();
-      setStudioStatus("Hindi voice तैयार है · " + (result.voiceModeLabel || "Selected voice mode") + "। नीचे Play करके सुनें।");
+      setStudioStatus(
+        "Hindi voice तैयार है · " + (result.voiceModeLabel || "Selected voice mode") +
+        " · वास्तविक अवधि " + Number(result.audioDurationSec || 0).toFixed(1) +
+        " sec / चुनी हुई अवधि " + result.targetDurationSec + " sec। नीचे Play करके सुनें।" +
+        (result.durationMatchesTarget ? "" : " अवधि match नहीं हुई है; video render करने से पहले voiceover ठीक करें।"),
+        !result.durationMatchesTarget
+      );
     } catch (error) {
       setStudioStatus(error.message || "Voice generation नहीं हो पाई।", true);
     } finally {
@@ -1826,6 +1845,9 @@
     document.getElementById("sendToBufferBtn").disabled = !document.getElementById("bufferChannelSelect").value;
   });
   document.getElementById("sendToBufferBtn").addEventListener("click", sendVideoToBuffer);
+  document.getElementById("reelsSafeAreaToggle").addEventListener("change", event => {
+    document.getElementById("reelsSafeAreaOverlay").hidden = !event.target.checked;
+  });
   document.getElementById("generateScriptBtn").addEventListener("click", () => generateScript(false));
   document.getElementById("convertScriptBtn").addEventListener("click", convertCurrentScriptToDevanagari);
   document.getElementById("saveScriptBtn").addEventListener("click", saveScriptEdits);
