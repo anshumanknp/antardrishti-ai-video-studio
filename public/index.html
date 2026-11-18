@@ -474,7 +474,7 @@
             <p class="brand-logo-note" id="brandLogoNote">PNG with transparent background works best. Upload once; it will be saved locally and added to every generated video.</p>
           </div>
         </div>
-        <div class="panel-heading"><h2>Scene visuals</h2><span class="panel-kicker">AI IMAGE · 9:16</span></div>
+        <div class="panel-heading"><h2>Scene visuals</h2><span class="panel-kicker">AI SHOTS · 9:16</span></div>
         <p class="scene-image-note" id="imageGenerationNote">Cloudflare Workers AI free image API configure करने के बाद यहाँ से image generation चालू होगी।</p>
         <div class="modal-actions">
           <button class="secondary-btn" id="generateImagesBtn" type="button" disabled>Generate Missing AI Images (Free API)</button>
@@ -905,6 +905,15 @@
     const missing = getPlannedImageTargets().filter(target =>
       !existingKeys.has(getImageTargetKey(target.sceneIndex, target.variantIndex))
     ).length;
+    const note = document.getElementById("imageGenerationNote");
+    if (note) {
+      const baseNote = note.dataset.baseText || note.textContent;
+      note.dataset.baseText = baseNote.replace(/ Video plan:.*$/, "");
+      note.textContent = activeScriptData
+        ? note.dataset.baseText + " Video plan: " + plan.totalShots + " visual shots using " +
+          plan.totalImages + " AI images. Ready: " + (plan.totalImages - missing) + "; missing: " + missing + "."
+        : note.dataset.baseText;
+    }
     button.disabled = !imageGenerationEnabled || !activeScriptData || missing === 0;
     button.textContent = !imageGenerationEnabled
       ? "Scene Images · Not configured"
@@ -976,8 +985,8 @@
         note.textContent = "Cloudflare का 10,000 Neurons/day free allocation पूरे account में shared है। Studio safety cap: " +
           (health.imageDailyLimit || 30) + " images/day (Cloudflare की असली Neuron limit से अलग)। इस्तेमाल: " +
           (health.imageUsageToday || 0) + " · Studio में शेष: " + (health.imageImagesRemaining ?? 0) +
-          ". Planned AI images: " + (activeScriptData ? getActiveVisualPlan().totalImages : "script के बाद") +
           ". Paid fallback नहीं होगा।";
+        note.dataset.baseText = note.textContent;
       } else {
         note.textContent = "Cloudflare free image API configure नहीं है। local .env में Account ID, API Token और CLOUDFLARE_IMAGE_ENABLED=true सेट करें। अभी कोई image request नहीं भेजी जाएगी।";
       }
