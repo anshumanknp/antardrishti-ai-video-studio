@@ -109,7 +109,26 @@ test("rejects missing scene copy and invalid subtitle segments", () => {
   script.scenes[1].subtitle_segments = ["एक"];
   const issues = validateScriptData(script, 30);
   assert.ok(issues.some(issue => issue.includes("dialogue")));
-  assert.ok(issues.some(issue => issue.includes("3 or 4")));
+  assert.ok(issues.some(issue => issue.includes("3 to 4")));
+});
+
+test("allows shorter caption sequences for 15-second reels", () => {
+  const script = validScript();
+  script.scenes.forEach(scene => {
+    scene.duration_sec = 5;
+    scene.subtitle_segments = ["पहला छोटा विचार", "दूसरा छोटा विचार"];
+  });
+  assert.deepEqual(validateScriptData(script, 15), []);
+});
+
+test("rejects a single caption segment in a 15-second scene", () => {
+  const script = validScript();
+  script.scenes.forEach(scene => {
+    scene.duration_sec = 5;
+    scene.subtitle_segments = ["केवल एक caption"];
+  });
+  const issues = validateScriptData(script, 15);
+  assert.ok(issues.some(issue => issue.includes("2 to 3")));
 });
 
 test("rejects non-positive scene durations and duration drift", () => {
