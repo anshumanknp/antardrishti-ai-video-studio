@@ -38,7 +38,7 @@ const DATA_DIR = path.join(__dirname, "..", "data");
 const OUTPUT_DIR = path.join(__dirname, "..", "outputs");
 const JOBS_FILE = path.join(DATA_DIR, "jobs.json");
 const BRAND_LOGO_META_FILE = path.join(DATA_DIR, "brand-logo.json");
-const GEMINI_TEXT_MODEL = "gemini-3.1-flash-lite";
+const GEMINI_TEXT_MODEL = "gemini-3.8-flash";
 const GEMINI_TTS_MODEL = process.env.GEMINI_TTS_MODEL || "gemini-3.1-flash-tts-preview";
 const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || "";
 const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN || "";
@@ -314,8 +314,10 @@ async function callGemini(body) {
 
   const requestedModel = body.model || GEMINI_TEXT_MODEL;
   const isTextRequest = !/tts|speech/i.test(requestedModel);
+  // Try the current general-purpose Flash model first. Keep both Lite models as
+  // fallbacks because transient regional capacity issues can affect one model at a time.
   const modelsToTry = isTextRequest
-    ? ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite"]
+    ? [...new Set([requestedModel, "gemini-3.1-flash-lite", "gemini-3.5-flash-lite"])]
     : [requestedModel];
 
   let lastError = null;
@@ -326,7 +328,7 @@ async function callGemini(body) {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
         body: JSON.stringify({ store: false, ...body, model }),
-        signal: AbortSignal.timeout(25000)
+        signal: AbortSignal.timeout(20000)
       });
       const payload = await response.json().catch(() => ({}));
       if (response.ok) return payload;
@@ -344,7 +346,7 @@ async function callGemini(body) {
       const timedOut = error?.name === "TimeoutError" || error?.name === "AbortError";
       if (!timedOut || index === modelsToTry.length - 1) {
         if (!error.status && timedOut) {
-          const timeoutError = new Error("Gemini ने 25 seconds में response नहीं दिया। कुछ देर बाद फिर कोशिश करें।");
+          const timeoutError = new Error("Gemini ने 20 seconds में response नहीं दिया। अगला available model आज़माया जा रहा है।");
           timeoutError.status = 504;
           throw timeoutError;
         }
