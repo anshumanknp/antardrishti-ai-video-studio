@@ -37,11 +37,14 @@ export function validateScriptData(scriptData, expectedDuration) {
     } else {
       totalDuration += scene.duration_sec;
     }
+    const minimumSegments = Number(expectedDuration) <= 15 ? 2 : 3;
+    const maximumSegments = Number(expectedDuration) <= 15 ? 3 : 4;
     if (!Array.isArray(scene.subtitle_segments) ||
-        scene.subtitle_segments.length < 3 ||
-        scene.subtitle_segments.length > 4 ||
+        scene.subtitle_segments.length < minimumSegments ||
+        scene.subtitle_segments.length > maximumSegments ||
         scene.subtitle_segments.some(segment => typeof segment !== "string" || !segment.trim())) {
-      issues.push("Scene " + number + " must have 3 or 4 non-empty subtitle segments.");
+      issues.push("Scene " + number + " must have " + minimumSegments + " to " +
+        maximumSegments + " non-empty subtitle segments.");
     }
   });
 
