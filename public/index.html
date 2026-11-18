@@ -309,6 +309,23 @@
           </div>
         </section>
       </div>
+
+      <section class="panel" style="margin-top:18px">
+        <div class="panel-heading">
+          <h2>Buffer connection</h2>
+          <span class="panel-kicker">API STATUS</span>
+        </div>
+        <p class="panel-kicker" style="text-transform:none;line-height:1.6">
+          Check your Buffer API key and view the connected social channels. This check does not publish anything.
+        </p>
+        <div class="modal-actions">
+          <button class="secondary-btn" id="checkBufferBtn" type="button">Check Buffer connection</button>
+        </div>
+        <p id="bufferStatus" role="status" style="margin:12px 0 8px;color:#5d6d80">
+          Buffer connection अभी check नहीं हुई है।
+        </p>
+        <div id="bufferChannels" aria-live="polite"></div>
+      </section>
     </section>
 
     <section class="panel create-panel" id="create">
@@ -483,7 +500,42 @@
   const messageEl = document.getElementById("message");
   const searchInput = document.getElementById("searchInput");
   const filterStatus = document.getElementById("filterStatus");
+  const checkBufferBtn = document.getElementById("checkBufferBtn");
+  const bufferStatus = document.getElementById("bufferStatus");
+  const bufferChannels = document.getElementById("bufferChannels");
   let jobs = [];
+
+  async function checkBufferConnection() {
+    checkBufferBtn.disabled = true;
+    bufferStatus.textContent = "Buffer account जाँचा जा रहा है…";
+    bufferChannels.innerHTML = "";
+    try {
+      const response = await fetch("/api/buffer/status");
+      const data = await response.json();
+      if (!response.ok || !data.connected) {
+        bufferStatus.textContent = data.error || data.message || "Buffer connection verify नहीं हो पाई।";
+        return;
+      }
+
+      const channels = Array.isArray(data.channels) ? data.channels : [];
+      bufferStatus.textContent = "Buffer connected. " +
+        (data.organizations?.length || 0) + " organization(s), " + channels.length + " channel(s) मिले।";
+      bufferChannels.innerHTML = channels.length
+        ? '<ul style="margin:8px 0 0;padding-left:20px">' + channels.map(channel => {
+            const state = channel.isDisconnected ? " · disconnected" :
+              channel.isQueuePaused ? " · queue paused" : " · ready";
+            return '<li>' + escapeHtml(channel.name) + ' — ' +
+              escapeHtml(channel.service) + escapeHtml(state) + '</li>';
+          }).join("") + '</ul>'
+        : "<p>इस Buffer account में कोई connected channel नहीं मिला।</p>";
+    } catch (error) {
+      bufferStatus.textContent = error.message || "Buffer connection check नहीं हो पाया।";
+    } finally {
+      checkBufferBtn.disabled = false;
+    }
+  }
+
+  checkBufferBtn.addEventListener("click", checkBufferConnection);
 
   const statusOptions = [
     ["brief_created", "Brief created"],
