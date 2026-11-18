@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { preserveSceneProductionFields, validateScriptData } from "../src/script-validation.js";
+import { getRecommendedSceneCount, preserveSceneProductionFields, validateScriptData } from "../src/script-validation.js";
 
 function validScript() {
   return {
@@ -54,10 +54,37 @@ test("accepts a complete three-scene script matching the selected duration", () 
   assert.deepEqual(validateScriptData(validScript(), 30), []);
 });
 
-test("rejects a script with the wrong number of scenes", () => {
-  const script = validScript();
-  script.scenes.pop();
-  assert.ok(validateScriptData(script, 20).some(issue => issue.includes("exactly 3 scenes")));
+test("rejects scripts outside the supported three-to-six scene range", () => {
+  const tooFew = validScript();
+  tooFew.scenes.pop();
+  assert.ok(validateScriptData(tooFew, 20).some(issue => issue.includes("between 3 and 6 scenes")));
+
+  const tooMany = validScript();
+  tooMany.scenes = Array.from({ length: 7 }, (_, index) => ({
+    ...validScript().scenes[0],
+    duration_sec: 5,
+    dialogue: "Scene " + (index + 1)
+  }));
+  assert.ok(validateScriptData(tooMany, 35).some(issue => issue.includes("between 3 and 6 scenes")));
+});
+
+test("recommends scene counts for 15, 30, 45 and 60 second videos", () => {
+  assert.equal(getRecommendedSceneCount(15), 3);
+  assert.equal(getRecommendedSceneCount(30), 3);
+  assert.equal(getRecommendedSceneCount(45), 5);
+  assert.equal(getRecommendedSceneCount(60), 6);
+});
+
+test("accepts duration-matched five- and six-scene scripts", () => {
+  for (const [duration, count] of [[45, 5], [60, 6]]) {
+    const script = validScript();
+    script.scenes = Array.from({ length: count }, (_, index) => ({
+      ...validScript().scenes[0],
+      duration_sec: duration / count,
+      dialogue: "यह scene " + (index + 1) + " का संवाद है।"
+    }));
+    assert.deepEqual(validateScriptData(script, duration), []);
+  }
 });
 
 test("rejects a scene missing production shot instructions", () => {
