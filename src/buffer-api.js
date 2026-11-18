@@ -1,5 +1,26 @@
 const SUPPORTED_SERVICES = new Set(["facebook", "instagram", "youtube"]);
 
+function isNonPublicHost(hostname) {
+  const host = String(hostname || "").toLowerCase().replace(/^\[|\]$/g, "");
+  if (["localhost", "localhost.localdomain", "::1", "0.0.0.0"].includes(host)) return true;
+  if (host.endsWith(".localhost") || host.endsWith(".local")) return true;
+
+  const octets = host.split(".").map(Number);
+  if (octets.length === 4 && octets.every(value => Number.isInteger(value) && value >= 0 && value <= 255)) {
+    const [a, b] = octets;
+    return a === 0 || a === 10 || a === 127 ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 198 && (b === 18 || b === 19)) ||
+      a >= 224;
+  }
+
+  return host.startsWith("fc") || host.startsWith("fd") ||
+    host.startsWith("fe80:") || host.startsWith("ff");
+}
+
 export function buildBufferVideoPostInput({
   channel,
   videoUrl,
@@ -24,8 +45,8 @@ export function buildBufferVideoPostInput({
   if (parsedUrl.protocol !== "https:" || parsedUrl.username || parsedUrl.password) {
     throw new Error("Video URL must be a public HTTPS URL without login credentials.");
   }
-  if (["localhost", "127.0.0.1", "::1"].includes(parsedUrl.hostname.toLowerCase())) {
-    throw new Error("Localhost video URLs cannot be fetched by Buffer. Use a public video URL.");
+  if (isNonPublicHost(parsedUrl.hostname)) {
+    throw new Error("Private or local video URLs cannot be fetched by Buffer. Use a public video URL.");
   }
 
   const copy = platformCopy && typeof platformCopy === "object" ? platformCopy : {};
