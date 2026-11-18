@@ -36,6 +36,7 @@ const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || "";
 const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN || "";
 const CLOUDFLARE_IMAGE_MODEL = process.env.CLOUDFLARE_IMAGE_MODEL || "@cf/black-forest-labs/flux-1-schnell";
 const CLOUDFLARE_IMAGE_STEPS = Math.max(1, Math.min(4, Number(process.env.CLOUDFLARE_IMAGE_STEPS || 4)));
+const BUFFER_API_KEY = String(process.env.BUFFER_API_KEY || "").trim();
 const CLOUDFLARE_IMAGE_DAILY_LIMIT = 100;
 const IMAGE_USAGE_FILE = path.join(DATA_DIR, "cloudflare-image-usage.json");
 const CLOUDFLARE_IMAGE_ENABLED = process.env.CLOUDFLARE_IMAGE_ENABLED === "true" &&
@@ -62,6 +63,46 @@ function writeJobs(jobs) {
   const tempFile = JOBS_FILE + ".tmp";
   fs.writeFileSync(tempFile, JSON.stringify(jobs, null, 2), "utf8");
   fs.renameSync(tempFile, JOBS_FILE);
+}
+
+async function bufferGraphQL(query) {
+  if (!BUFFER_API_KEY) {
+    const error = new Error("Buffer API key सेट नहीं है। Project की local .env file में BUFFER_API_KEY जोड़ें और server restart करें।");
+    error.status = 400;
+    throw error;
+  }
+
+  const response = await fetch("https://api.buffer.com", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: "Bearer " + BUFFER_API_KEY
+    },
+    body: JSON.stringify({ query }),
+    signal: AbortSignal.timeout(15000)
+  });
+
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error("Buffer API से पढ़ने योग्य response नहीं मिला।");
+  }
+
+  const errors = Array.isArray(payload?.errors) ? payload.errors : [];
+  if (!response.ok || errors.length) {
+    const message = errors.map(item => item.message).filter(Boolean).join("; ");
+    const error = new Error(
+      response.status === 401
+        ? "Buffer API key स्वीकार नहीं हुई। Buffer Settings → API में key जाँचें।"
+        : message || "Buffer API request असफल रही (HTTP " + response.status + ")."
+    );
+    error.status = response.status === 401 ? 401 : 502;
+    throw error;
+  }
+
+  if (!payload?.data) throw new Error("Buffer API response में data नहीं मिला।");
+  return payload.data;
 }
 
 function pcmToWav(pcm, sampleRate = 24000, channels = 1, bitsPerSample = 16) {
@@ -975,6 +1016,79 @@ app.patch("/api/jobs/:id", (req, res) => {
   job.updatedAt = new Date().toISOString();
   writeJobs(jobs);
   res.json(job);
+});
+
+app.get("/api/buffer/status", async (_req, res) => {
+  if (!BUFFER_API_KEY) {
+    return res.json({
+      configured: false,
+      connected: false,
+      message: "Buffer API key अभी local .env में configured नहीं है।"
+    });
+  }
+
+  try {
+    const accountData = await bufferGraphQL(`
+      query {
+        account {
+          organizations {
+            id
+            name
+          }
+        }
+      }
+    `);
+
+    const organizations = Array.isArray(accountData?.account?.organizations)
+      ? accountData.account.organizations
+      : [];
+
+    const organizationsWithChannels = await Promise.all(organizations.map(async organization => {
+      const channelData = await bufferGraphQL(`
+        query {
+          channels(input: { organizationId: ${JSON.stringify(organization.id)} }) {
+            id
+            name
+            service
+            descriptor
+            displayName
+            isDisconnected
+            isQueuePaused
+          }
+        }
+      `);
+      return {
+        id: organization.id,
+        name: organization.name,
+        channels: Array.isArray(channelData?.channels) ? channelData.channels : []
+      };
+    }));
+
+    const channels = organizationsWithChannels.flatMap(organization =>
+      organization.channels.map(channel => ({
+        id: channel.id,
+        name: channel.displayName || channel.name,
+        service: channel.service,
+        descriptor: channel.descriptor,
+        isDisconnected: Boolean(channel.isDisconnected),
+        isQueuePaused: Boolean(channel.isQueuePaused),
+        organizationName: organization.name
+      }))
+    );
+
+    res.json({
+      configured: true,
+      connected: true,
+      organizations: organizationsWithChannels.map(({ id, name }) => ({ id, name })),
+      channels
+    });
+  } catch (error) {
+    res.status(error.status || 502).json({
+      configured: true,
+      connected: false,
+      error: error.message || "Buffer connection check नहीं हो पाया।"
+    });
+  }
 });
 
 app.listen(PORT, "0.0.0.0", () => {
