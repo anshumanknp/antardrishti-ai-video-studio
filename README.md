@@ -112,6 +112,19 @@ GEMINI_IMAGE_MODEL=gemini-3.1-flash-lite-image
 
 Only when you explicitly decide to use paid image generation, change the first setting to `true` and restart the server. The **Generate AI Scene Images (Paid)** button then becomes available. It asks for confirmation before generating images. The server stores generated scene images in `outputs/`, reuses existing images unless a full refresh is confirmed, and deletes them when the related video job is deleted.
 
+## Buffer connection check
+
+The dashboard includes a server-side Buffer API connection check. To enable it:
+
+1. Add your Buffer key to the local `.env` file as `BUFFER_API_KEY=your_key`.
+2. Save the file and restart the app with `npm start`.
+3. Open the dashboard and select **Check Buffer connection**.
+4. The dashboard will show the Buffer organizations and connected channels. This check is read-only; it does not create or publish posts.
+
+Keep the real key out of GitHub and browser code. The repository is public, and `.env` is ignored by Git.
+
+**Video publishing is not connected yet.** Buffer requires each video asset URL to be publicly reachable over HTTPS. Files stored only in the local `outputs/` folder cannot be fetched by Buffer. The next publishing step needs stable public media hosting, then a reviewed queue/scheduling action for the selected Buffer channel.
+
 ## Requirements
 
 - Node.js 18.17 or newer
