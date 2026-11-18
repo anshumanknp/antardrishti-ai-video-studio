@@ -998,16 +998,14 @@
       activeJob.voiceModeLabel = voiceResult.voiceModeLabel;
       activeJob.voiceDurationSec = voiceResult.audioDurationSec;
       const targetVoiceDuration = Number(activeJob.duration || 45);
-      const voiceTolerance = Math.max(2, targetVoiceDuration * 0.08);
-      if (!Number.isFinite(Number(voiceResult.audioDurationSec)) ||
-          Number(voiceResult.audioDurationSec) < targetVoiceDuration - voiceTolerance ||
-          Number(voiceResult.audioDurationSec) > targetVoiceDuration + 0.05) {
-        throw new Error(
-          "Voiceover " + Number(voiceResult.audioDurationSec || 0).toFixed(1) +
-          " sec की बनी है, जबकि selected video " + targetVoiceDuration +
-          " sec का है। Voiceover को target duration के अनुसार edit करके Generate Hindi Voice दोबारा करें। Images बनाने से पहले duration ठीक करना जरूरी है।"
-        );
+      const actualVoiceDuration = Number(voiceResult.audioDurationSec);
+      if (!Number.isFinite(actualVoiceDuration) || actualVoiceDuration <= 0) {
+        throw new Error("Voiceover की वास्तविक अवधि नहीं मिल पाई। Generate Hindi Voice दोबारा करें।");
       }
+      setStudioStatus(
+        "Voice तैयार है: " + actualVoiceDuration.toFixed(1) +
+        " sec। " + targetVoiceDuration + " sec चुना गया था; final video actual voice duration के अनुसार render होगी।"
+      );
 
       const currentImages = Array.isArray(activeJob.sceneImages) ? activeJob.sceneImages : [];
       const expectedCount = (activeScriptData.scenes || []).length;
@@ -1440,9 +1438,8 @@
       setStudioStatus(
         "Hindi voice तैयार है · " + (result.voiceModeLabel || "Selected voice mode") +
         " · वास्तविक अवधि " + Number(result.audioDurationSec || 0).toFixed(1) +
-        " sec / चुनी हुई अवधि " + result.targetDurationSec + " sec। नीचे Play करके सुनें।" +
-        (result.durationMatchesTarget ? "" : " अवधि match नहीं हुई है; video render करने से पहले voiceover ठीक करें।"),
-        !result.durationMatchesTarget
+        " sec। चुनी हुई अवधि " + result.targetDurationSec +
+        " sec script का target है; final video actual voice duration के अनुसार बनेगी। नीचे Play करके सुनें।"
       );
     } catch (error) {
       setStudioStatus(error.message || "Voice generation नहीं हो पाई।", true);
@@ -1538,17 +1535,11 @@
         }
       }
 
-      const voiceTolerance = Math.max(2, targetDuration * 0.08);
-      if (audioBuffer &&
-          (audioBuffer.duration < targetDuration - voiceTolerance ||
-           audioBuffer.duration > targetDuration + 0.05)) {
-        throw new Error(
-          "Generated voice " + audioBuffer.duration.toFixed(1) + " sec की है, जबकि video " +
-          targetDuration + " sec का चुना गया है। Voiceover edit करके Generate Hindi Voice दोबारा करें।"
-        );
-      }
-      const totalSec = targetDuration;
-      const contentSec = Math.max(3, totalSec - introSec - outroSec);
+      const voiceTailSec = 0.15;
+      const totalSec = audioBuffer
+        ? audioBuffer.duration + voiceTailSec
+        : targetDuration;
+      const contentSec = Math.max(0.5, totalSec - introSec - outroSec);
       const totalWeight = scenes.reduce((sum, scene) => sum + Math.max(1, Number(scene.duration_sec || 5)), 0);
       const slides = [
         { type: "intro", duration: introSec, title: activeScriptData.title, body: activeScriptData.hook }
