@@ -5,7 +5,7 @@ A separate, local-first workspace for planning and tracking Antardrishti short-v
 ## Product brief
 
 - 30 short videos per month
-- 30–60 seconds, vertical 9:16
+- Selectable video lengths: 15, 30, 45 or 60 seconds, vertical 9:16
 - Hindi-first language mix: about 90% Hindi and 10% English
 - Natural Indian Hindi voice target
 - Mixed format: AI presenter combined with cinematic generated visuals
@@ -49,7 +49,7 @@ Female voice choices: Kore, Aoede, Leda, Zephyr and Gacrux. Male voice choices: 
 - Open Script Studio and go to **Brand logo**.
 - Choose a PNG, JPG or WebP image up to 1.5 MB, then select **Upload / Replace Logo**.
 - A transparent PNG is recommended. The logo is saved locally in the project's `outputs/` folder and reused on future videos from this Studio.
-- The renderer places the logo in the top-right corner of every slide. Use a compact, horizontal logo with a transparent background for the cleanest result.
+- The renderer places the logo at the top-right inside the Reels-safe area. The logo is larger than the original starter layout. Use a compact, horizontal logo with a transparent background for the cleanest result.
 - Use **Remove Logo** to delete the saved logo. The logo is separate from generated AI scene art, so it stays sharp and does not get distorted by the image model.
 
 AI scene-image prompts explicitly ask for no words, lettering, numbers, labels, scene names or logos. The video renderer adds the scene caption and brand logo after the background image is generated. Existing scene images made with older prompts may still have unwanted lettering; use **Generate / Refresh Scene Images (Free API)** once to replace them.
@@ -63,13 +63,13 @@ Each generated scene now carries a production brief alongside its Hindi dialogue
 - **Transition:** the edit into the next scene, using a simple cut, dissolve or match cut.
 - **Audio cue:** a short music or sound-effect direction that stays behind the narration.
 
-The server validates these fields before accepting a generated script. Incomplete scene plans are rejected with a validation error instead of being saved as ready-to-use scripts. These cues are currently stored as production metadata; the browser renderer does not yet execute camera moves or transitions as separate timeline tracks.
+The server validates these fields before accepting a generated script. The image prompt uses the requested shot type, and the browser renderer applies simulated push-in, pull-out, pan and tilt moves to generated stills. A dissolve/cross-fade is applied when that transition is requested; hard cuts remain immediate. These are still-image camera effects, not real camera footage or character movement. Audio cues remain production notes; this version does not generate a separate music or sound-effect track.
 
 ### Video and subtitles
 
-The current video builder uses animated gradients for title cards and generated scene artwork with a slow Ken Burns motion. It starts the narration from the opening hook, overlays the uploaded brand logo, displays short sequential Hindi caption segments in each scene, and creates a matching scene-timed Hindi `.srt` file. It can export MP4 or WebM depending on browser support. The scene caption timings are distributed evenly within their scene; they are not word-level forced alignment.
+The current video builder uses animated gradient title cards and generated scene artwork. It starts narration at the opening, overlays the uploaded logo, shows each scene's main subtitle and its sequential Hindi caption segments, and creates a scene-timed Hindi `.srt` file. Shot framing and supported camera moves affect the rendered image. Content, logo and progress indicator stay inside a central Reels-safe region; the video preview has an optional Instagram UI/safe-area guide. The guide is preview-only and is not exported. MP4 or WebM output depends on browser support. Caption segments are timed evenly within each scene, not word-level forced alignment.
 
-The Studio can generate one AI image for each of the three scenes using Cloudflare Workers AI's free allocation, then use those images as full-bleed video backgrounds. It uses the `@cf/black-forest-labs/flux-1-schnell` model. Cloudflare's Free Workers plan includes 10,000 AI Neurons per day, shared across the account. The Studio adds its own hard limit of 100 generated images per UTC day and has no paid image-provider fallback. Visual directions are used as image prompts and are not printed as text over the scenes. AI presenter footage and generated cinematic video clips are separate future integrations.
+The Studio generates one AI image for each scene in the script. It uses 3 scenes for 15/30-second videos, 5 for 45 seconds and 6 for 60 seconds, then uses those images as full-bleed video backgrounds. It uses the `@cf/black-forest-labs/flux-1-schnell` model. Cloudflare's Free Workers plan includes 10,000 AI Neurons per day, shared across the account. The Studio adds its own hard limit of 100 generated images per UTC day and has no paid image-provider fallback. Visual directions are used as image prompts and are not printed as text over the scenes. AI presenter footage and generated cinematic video clips are separate future integrations.
 
 ### One-click automation
 
@@ -81,7 +81,7 @@ After Cloudflare is configured, open a video job and press **Auto Create Video (
 4. Generate missing scene images through Cloudflare Workers AI. Existing images are reused.
 5. Render the vertical video with the voice, scene images and Hindi subtitles, then prepare the separate SRT download.
 
-The automation stops on an API or quota error and shows the failed step. It does not fall back to a paid provider. You still review the final video and decide when to publish it.
+The script generator targets the selected length with duration-specific narration word ranges and scene counts. After TTS, the Studio measures the actual voice duration. Auto Create stops before spending image-generation quota when the narration differs from the selected length by more than 2 seconds or 8% (whichever is greater). The renderer uses the selected 15/30/45/60-second duration and blocks a large voice/video mismatch instead of exporting a short or cut-off reel. The automation also stops on an API or quota error and shows the failed step. It does not fall back to a paid provider. You still review the final video and decide when to publish it.
 
 ### Social media copy and Buffer queue
 
