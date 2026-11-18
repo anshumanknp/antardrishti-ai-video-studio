@@ -1,3 +1,10 @@
+export function getRecommendedSceneCount(duration) {
+  const seconds = Number(duration);
+  if (seconds <= 30) return 3;
+  if (seconds <= 45) return 5;
+  return 6;
+}
+
 export function validateScriptData(scriptData, expectedDuration) {
   const issues = [];
   if (!scriptData || typeof scriptData !== "object" || Array.isArray(scriptData)) {
@@ -8,8 +15,8 @@ export function validateScriptData(scriptData, expectedDuration) {
       issues.push("Missing " + field + ".");
     }
   }
-  if (!Array.isArray(scriptData.scenes) || scriptData.scenes.length !== 3) {
-    issues.push("A video script must contain exactly 3 scenes.");
+  if (!Array.isArray(scriptData.scenes) || scriptData.scenes.length < 3 || scriptData.scenes.length > 6) {
+    issues.push("A video script must contain between 3 and 6 scenes.");
     return issues;
   }
 
