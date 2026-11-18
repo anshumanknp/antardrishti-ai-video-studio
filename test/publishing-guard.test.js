@@ -9,13 +9,15 @@ import {
 const videoUrl = "https://cdn.example.com/short.mp4";
 
 test("Buffer queue requires an explicitly approved video job", () => {
-  assert.throws(
-    () => assertBufferPublishAllowed({ id: "job-1", status: "review" }, {
-      channelId: "ig-1",
-      videoUrl
-    }),
-    /set this job's dashboard status to Approved/i
-  );
+  for (const status of ["brief_created", "review", "exported", "published"]) {
+    assert.throws(
+      () => assertBufferPublishAllowed({ id: "job-1", status }, {
+        channelId: "ig-1",
+        videoUrl
+      }),
+      /set this job's dashboard status to Approved/i
+    );
+  }
   assert.equal(
     assertBufferPublishAllowed({ id: "job-1", status: "approved" }, {
       channelId: "ig-1",
