@@ -52,7 +52,7 @@ Female voice choices: Kore, Aoede, Leda, Zephyr and Gacrux. Male voice choices: 
 - The renderer places the logo at the top-right inside the Reels-safe area. The logo is larger than the original starter layout. Use a compact, horizontal logo with a transparent background for the cleanest result.
 - Use **Remove Logo** to delete the saved logo. The logo is separate from generated AI scene art, so it stays sharp and does not get distorted by the image model.
 
-AI scene-image prompts explicitly ask for no words, lettering, numbers, labels, scene names or logos. The video renderer adds the scene caption and brand logo after the background image is generated. Existing scene images made with older prompts may still have unwanted lettering; use **Generate / Refresh Scene Images (Free API)** once to replace them.
+AI scene-image prompts explicitly ask for no words, lettering, numbers, labels, scene names or logos. The video renderer adds the scene caption and brand logo after the background image is generated. Existing scene images made with older prompts may still have unwanted lettering; use **Generate Missing AI Images** once to replace them.
 
 ### Scene production plan
 
@@ -69,7 +69,7 @@ The server validates these fields before accepting a generated script. The image
 
 The current video builder uses animated gradient title cards and generated scene artwork. It starts narration at the opening, overlays the uploaded logo, shows each scene's main subtitle and its sequential Hindi caption segments (2–3 segments per scene for 15-second videos; 3–4 for longer videos), and creates a scene-timed Hindi `.srt` file. Shot framing and supported camera moves affect the rendered image. Content, logo and progress indicator stay inside a central Reels-safe region; the video preview has an optional Instagram UI/safe-area guide. The guide is preview-only and is not exported. MP4 or WebM output depends on browser support. Caption segments are timed evenly within each scene, not word-level forced alignment.
 
-The Studio generates one AI image for each scene in the script. It uses 3 scenes for 15/30-second videos, 5 for 45 seconds and 6 for 60 seconds, then uses those images as full-bleed video backgrounds. It uses the `@cf/black-forest-labs/flux-1-schnell` model. Cloudflare's Free Workers plan includes 10,000 AI Neurons per day, shared across the account. The Studio adds its own hard limit of 100 generated images per UTC day and has no paid image-provider fallback. Visual directions are used as image prompts and are not printed as text over the scenes. AI presenter footage and generated cinematic video clips are separate future integrations.
+The Studio uses a duration-based visual plan rather than generating a single image per scene. The current plan is 5 visual shots / 4 AI images for 15 seconds, 8 / 6 for 30 seconds, 10 / 8 for 45 seconds and 13 / 10 for 60 seconds. Extra visual shots reuse an existing scene image with a different crop and simulated camera move, so they do not trigger another image request. Only missing planned images are generated. The gallery also has a per-image regenerate action; it replaces only that selected image. The `@cf/black-forest-labs/flux-1-schnell` model creates square stills that the renderer crops to 9:16. Cloudflare's 10,000 AI Neurons/day Free allocation is shared across the account. The Studio applies a separate safety cap of 30 image requests per UTC day; this app cap is not a measurement of Cloudflare Neurons. There is no paid image-provider fallback. AI presenter footage and real generated cinematic video clips remain separate future integrations.
 
 ### One-click automation
 
@@ -134,7 +134,7 @@ Keep the token private. Do not paste it into chat or commit it to GitHub. The im
 - Duet uses Gemini's two-speaker TTS configuration.
 - Blend makes two TTS requests and mixes their PCM audio into one WAV.
 
-TTS requests can take longer than script generation. Blend uses about twice the TTS generation requests of a single voice. Cloudflare Workers AI's Free plan currently includes 10,000 Neurons per day, shared with other Workers AI usage in the same account. The Studio applies a conservative cap of 100 scene-image requests per UTC day and does not automatically switch to a paid image API. When the Cloudflare daily quota is exhausted, image generation stops until the quota resets. Check Cloudflare's current pricing and dashboard usage before production use. Gemini text and TTS free-tier access is also subject to quotas and can change. Do not send private client or therapy information to either API.
+TTS requests can take longer than script generation. Blend uses about twice the TTS generation requests of a single voice. Cloudflare Workers AI's Free plan currently includes 10,000 Neurons per day, shared with other Workers AI usage in the same account. The Studio applies its own safety cap of 30 image requests per UTC day and does not automatically switch to a paid image API. When the Cloudflare daily quota is exhausted, image generation stops until the quota resets. Check Cloudflare's current pricing and dashboard usage before production use. Gemini text and TTS free-tier access is also subject to quotas and can change. Do not send private client or therapy information to either API.
 
 ### Enable paid scene images (optional)
 
@@ -145,7 +145,7 @@ GEMINI_IMAGE_ENABLED=false
 GEMINI_IMAGE_MODEL=gemini-3.1-flash-lite-image
 ```
 
-Only when you explicitly decide to use paid image generation, change the first setting to `true` and restart the server. The **Generate AI Scene Images (Paid)** button then becomes available. It asks for confirmation before generating images. The server stores generated scene images in `outputs/`, reuses existing images unless a full refresh is confirmed, and deletes them when the related video job is deleted.
+Only when you explicitly decide to use paid image generation, change the first setting to `true` and restart the server. The **Generate AI Scene Images (Paid)** button then becomes available. It asks for confirmation before generating images. The server stores generated scene images in `outputs/`, reuses existing images unless a selected-image regeneration is confirmed, and deletes them when the related video job is deleted.
 
 ## Requirements
 
