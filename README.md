@@ -125,6 +125,8 @@ CLOUDINARY_UPLOAD_PRESET=antardrishti_buffer_video
 
 The cloud name and unsigned preset name are not API secrets, but the preset enables unauthenticated uploads. Do not use an unrestricted preset. Never put the Cloudinary API secret in browser code, chat or GitHub.
 
+The dashboard gives AI caption generation up to 70 seconds, Cloudinary upload up to 3 minutes, and Buffer queue submission up to 110 seconds. Server-side Buffer calls time out after 25 seconds each. A timeout is shown as an error instead of leaving a button spinning indefinitely. For diagnosis, read the PowerShell window running `npm start`: failures are labelled `[social-copy]`, `[buffer-status]`, `[buffer-queue]` or `[buffer-queue-all]`.
+
 The Studio keeps the Cloudinary URL with the job, so retries reuse the same hosted video. If the script, platform copy, voice or scene images change after approval, the job returns to review and the old hosted URL is cleared. Review and approve the new content before queueing again.
 
 The server only queues a job whose status is exactly **Approved**. The Studio creates separate posts per selected channel and records each success. It blocks duplicate posting of the same video to the same channel. If one channel fails, successful channels remain queued and the result lists the failures so only those can be retried. A successful queue action means Buffer accepted the scheduled post; it does not mean the post has already published.
