@@ -7,6 +7,7 @@ import { readJobs as readJobStore, writeJobs as writeJobStore } from "./job-stor
 import { getRecommendedSceneCount, preserveSceneProductionFields, validateScriptData } from "./script-validation.js";
 import { buildCloudflareScenePrompt } from "./image-prompt.js";
 import { getAlternateShotType, getVideoVisualPlan, getVisualImageTargets } from "./visual-plan.js";
+import { classifyCloudflareImageError } from "./cloudflare-errors.js";
 import { buildBufferVideoPostInput } from "./buffer-api.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -148,13 +149,16 @@ async function generateCloudflareSceneImage(prompt) {
       const messageBody = contentType.includes("application/json")
         ? await response.json().catch(() => ({}))
         : { errors: [{ message: (await response.text().catch(() => "")).slice(0, 300) }] };
-      const apiMessage = messageBody?.errors?.map(item => item.message).filter(Boolean).join("; ");
-      const error = new Error(
-        response.status === 429
-          ? "Cloudflare की daily free AI quota या rate limit पूरी हो गई है। कोई paid fallback नहीं होगा।"
-          : apiMessage || "Cloudflare Workers AI image request failed (HTTP " + response.status + ")."
-      );
-      error.status = response.status === 429 ? 429 : response.status >= 500 ? 502 : response.status;
+      const details = classifyCloudflareImageError({
+        httpStatus: response.status,
+        payload: messageBody,
+        retryAfterHeader: response.headers.get("retry-after")
+      });
+      const error = new Error(details.message);
+      error.status = details.status;
+      error.cloudflareErrorCode = details.code;
+      error.retryAfterSeconds = details.retryAfterSeconds;
+      error.cfRay = response.headers.get("cf-ray") || "";
       throw error;
     }
 
@@ -1014,6 +1018,9 @@ app.post("/api/jobs/:id/generate-scene-images", async (req, res) => {
     res.status(error.status || 502).json({
       error: error.message || "AI scene images generate नहीं हो पाईं।",
       generatedImages: results.length,
+      cloudflareErrorCode: error.cloudflareErrorCode || null,
+      retryAfterSeconds: error.retryAfterSeconds ?? null,
+      cfRay: error.cfRay || null,
       job,
       sceneImages: savedImages,
       visualPlan
