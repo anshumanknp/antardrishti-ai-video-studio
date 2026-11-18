@@ -1712,9 +1712,9 @@
             captions: shotCaptions.length ? shotCaptions : [sceneCaptions[sceneCaptions.length - 1] || scene.subtitle || ""].filter(Boolean),
             visual: scene.visual_direction || "",
             subtitle: shotIndex === 0 ? scene.subtitle || "" : "",
-            shotType: selectedImage?.shotType || (shotIndex === 0
-              ? scene.shot_type || "medium shot"
-              : (reusedOriginalImage ? "close-up detail shot" : "wide environmental shot")),
+            shotType: reusedOriginalImage
+              ? (String(scene.shot_type || "").toLowerCase().includes("wide") ? "close-up detail shot" : "wide environmental shot")
+              : selectedImage?.shotType || scene.shot_type || "medium shot",
             cameraMovement: shotIndex === 0
               ? selectedImage?.cameraMovement || scene.camera_movement || "gentle push-in"
               : alternateMovement[(shotIndex - 1) % alternateMovement.length],
