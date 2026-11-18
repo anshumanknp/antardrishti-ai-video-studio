@@ -54,6 +54,17 @@ Female voice choices: Kore, Aoede, Leda, Zephyr and Gacrux. Male voice choices: 
 
 AI scene-image prompts explicitly ask for no words, lettering, numbers, labels, scene names or logos. The video renderer adds the scene caption and brand logo after the background image is generated. Existing scene images made with older prompts may still have unwanted lettering; use **Generate / Refresh Scene Images (Free API)** once to replace them.
 
+### Scene production plan
+
+Each generated scene now carries a production brief alongside its Hindi dialogue and captions:
+
+- **Shot type:** framing such as close-up, medium shot or wide shot.
+- **Camera movement:** a practical move such as static, slow push-in, pan or tracking.
+- **Transition:** the edit into the next scene, using a simple cut, dissolve or match cut.
+- **Audio cue:** a short music or sound-effect direction that stays behind the narration.
+
+The server validates these fields before accepting a generated script. Incomplete scene plans are rejected with a validation error instead of being saved as ready-to-use scripts. These cues are currently stored as production metadata; the browser renderer does not yet execute camera moves or transitions as separate timeline tracks.
+
 ### Video and subtitles
 
 The current video builder uses animated gradients for title cards and generated scene artwork with a slow Ken Burns motion. It starts the narration from the opening hook, overlays the uploaded brand logo, displays short sequential Hindi caption segments in each scene, and creates a matching scene-timed Hindi `.srt` file. It can export MP4 or WebM depending on browser support. The scene caption timings are distributed evenly within their scene; they are not word-level forced alignment.
