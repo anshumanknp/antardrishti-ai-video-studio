@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
+import { readJobs as readJobStore, writeJobs as writeJobStore } from "./job-store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -53,16 +54,8 @@ app.use(express.json({ limit: "3mb" }));
 app.use(express.static(path.join(__dirname, "..", "public")));
 app.use("/outputs", express.static(OUTPUT_DIR));
 
-function readJobs() {
-  try { return JSON.parse(fs.readFileSync(JOBS_FILE, "utf8")); }
-  catch { return []; }
-}
-
-function writeJobs(jobs) {
-  const tempFile = JOBS_FILE + ".tmp";
-  fs.writeFileSync(tempFile, JSON.stringify(jobs, null, 2), "utf8");
-  fs.renameSync(tempFile, JOBS_FILE);
-}
+function readJobs() { return readJobStore(JOBS_FILE); }
+function writeJobs(jobs) { return writeJobStore(JOBS_FILE, jobs); }
 
 function pcmToWav(pcm, sampleRate = 24000, channels = 1, bitsPerSample = 16) {
   const header = Buffer.alloc(44);
