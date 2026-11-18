@@ -136,16 +136,11 @@ Keep the token private. Do not paste it into chat or commit it to GitHub. The im
 
 TTS requests can take longer than script generation. Blend uses about twice the TTS generation requests of a single voice. Cloudflare Workers AI's Free plan currently includes 10,000 Neurons per day, shared with other Workers AI usage in the same account. The Studio applies its own safety cap of 30 image requests per UTC day and does not automatically switch to a paid image API. When the Cloudflare daily quota is exhausted, image generation stops until the quota resets. Check Cloudflare's current pricing and dashboard usage before production use. Gemini text and TTS free-tier access is also subject to quotas and can change. Do not send private client or therapy information to either API.
 
-### Enable paid scene images (optional)
+### Image provider and quota controls
 
-Leave these settings in the local `.env` file to keep image generation off:
+Scene images use Cloudflare Workers AI FLUX Schnell when `CLOUDFLARE_IMAGE_ENABLED=true` and the local `.env` contains a valid Cloudflare Account ID and API token. Keep the flag set to `false` to disable image generation. The Studio does not call a paid image fallback.
 
-```env
-GEMINI_IMAGE_ENABLED=false
-GEMINI_IMAGE_MODEL=gemini-3.1-flash-lite-image
-```
-
-Only when you explicitly decide to use paid image generation, change the first setting to `true` and restart the server. The **Generate AI Scene Images (Paid)** button then becomes available. It asks for confirmation before generating images. The server stores generated scene images in `outputs/`, reuses existing images unless a selected-image regeneration is confirmed, and deletes them when the related video job is deleted.
+The image gallery generates only missing planned assets and offers a separate **Regenerate this image** action for one selected asset. The application has its own safety cap of 30 successful image requests per UTC day. This is separate from Cloudflare's account-wide Neurons allocation and does not predict or measure Neuron consumption.
 
 ## Requirements
 
