@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import { readJobs as readJobStore, writeJobs as writeJobStore } from "./job-store.js";
-import { preserveSceneProductionFields, validateScriptData } from "./script-validation.js";
+import { getRecommendedSceneCount, preserveSceneProductionFields, validateScriptData } from "./script-validation.js";
 import { buildBufferVideoPostInput } from "./buffer-api.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -651,17 +651,21 @@ app.post("/api/jobs", (req, res) => {
   const allowedFormats = new Set(["mixed", "presenter", "cinematic"]);
   const selectedFormat = allowedFormats.has(format) ? format : "mixed";
   const numericDuration = Number(duration);
+  const allowedDurations = new Set([15, 30, 45, 60]);
+  const selectedDuration = allowedDurations.has(numericDuration) ? numericDuration : 45;
   const job = {
     id: randomUUID(),
     topic: topic.trim().slice(0, 300),
     format: selectedFormat,
-    duration: Math.max(15, Math.min(90, Number.isFinite(numericDuration) ? numericDuration : 45)),
+    duration: selectedDuration,
     language: "Hindi 90%, English 10%",
     aspectRatio: "9:16",
     status: "brief_created",
     script: "",
     scriptData: null,
     voiceFile: "",
+    voiceDurationSec: null,
+    voiceDurationMatchesTarget: null,
     sceneImages: [],
     voiceMode: "female",
     femaleVoice: DEFAULT_FEMALE_VOICE,
@@ -681,6 +685,8 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
   const { jobs, job } = findJob(req.params.id);
   if (!job) return res.status(404).json({ error: "Video brief not found." });
 
+  const expectedSceneCount = getRecommendedSceneCount(job.duration);
+  const targetWordRanges = { 15: "28–36", 30: "56–68", 45: "84–100", 60: "112–132" };
   const schema = {
     type: "object",
     properties: {
@@ -694,9 +700,9 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
           properties: {
             duration_sec: { type: "integer" },
             dialogue: { type: "string", description: "Presenter dialogue in Devanagari Hindi, never Roman Hindi." },
-            visual_direction: { type: "string", description: "Internal visual-production prompt. English is allowed here; describe subject, setting, lighting, composition and action." },
-            shot_type: { type: "string", description: "Choose a clear framing such as close-up, medium shot, wide shot, overhead or detail shot." },
-            camera_movement: { type: "string", description: "Choose a practical movement such as static, slow push-in, pan, tilt or tracking; avoid complex impossible moves." },
+            visual_direction: { type: "string", description: "Internal visual prompt: exact subject, action, setting, culture, lighting and composition. Respect abstract-only directions." },
+            shot_type: { type: "string", description: "Choose an executable framing such as close-up, medium shot, wide shot, overhead or detail shot. The image prompt and renderer must use it." },
+            camera_movement: { type: "string", description: "Choose an executable movement: slow push-in, pull-out, pan left/right, tilt up/down or gentle tracking. The renderer applies simulated motion to the still image." },
             transition: { type: "string", description: "Describe a simple edit transition into the next scene, such as hard cut, dissolve, match cut or whip pan." },
             audio_cue: { type: "string", description: "Short music or sound-effect cue that supports the scene without competing with Hindi dialogue." },
             subtitle: { type: "string", description: "A short central idea subtitle in Devanagari Hindi." },
@@ -730,15 +736,20 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
     "- The title, hook, voiceover, scene dialogue, subtitles and CTA must be in natural Hindi using Devanagari. Keep English words to at most about 10% and use them only when natural.",
     "- Correct style example: \"क्या आप जानते हैं कि आपका मन आपके अनुभवों को कैसे प्रभावित करता है?\" Incorrect style: \"Kya aap jaante hain ki aapka man...\"",
     "- Warm, grounded Indian Hindi voice. Use everyday language, not stiff translated Hindi.",
-    "- Make the voiceover fit the selected duration.",
+    "- Make the voiceover fit the selected duration. Aim for approximately " + targetWordRanges[job.duration] + " spoken Hindi words, including hook and CTA, at a calm Indian Hindi narration pace. Do not pad with repetition.",
     "- Write a strong hook for the first 2–3 seconds.",
-    "- Provide exactly 3 concise scenes. Each scene must include dialogue in Devanagari Hindi, a short subtitle in Devanagari Hindi, 3 or 4 sequential subtitle_segments in Devanagari Hindi, and a practical visual direction.",
-    "- For every scene, specify shot_type, camera_movement, transition and audio_cue. Use simple production choices that can be executed in a lightweight vertical-video editor.",
+    "- Provide exactly " + expectedSceneCount + " scenes. Divide the selected duration across scenes in whole seconds, with durations adding up to exactly " + job.duration + " seconds. Use 3 scenes for 15/30 seconds, 5 for 45 seconds and 6 for 60 seconds.",
+    "- Each scene needs dialogue in Devanagari Hindi, a short central subtitle, 3 or 4 sequential subtitle_segments and a visual direction specific to that dialogue.",
+    "- Specify shot_type, camera_movement, transition and audio_cue for every scene. These must be executable instructions, not labels only.",
     "- Each subtitle segment should be a natural spoken phrase of about 3–7 words. Keep the segments in the same order as the dialogue so they can appear one after another during that scene.",
     "- Do not put Scene 1, Scene 2, Scene 3, scene numbers, headings or labels in dialogue or subtitles.",
     "- Visual directions are internal production prompts, not audience copy. They may be written in clear English so future image/video models can understand them.",
     "- Move quickly from hook to explanation to one useful takeaway and CTA.",
-    "- Visual directions should describe visuals that can be composed from typography, shapes and gradients. Do not ask to draw text inside an AI image.",
+    "- Visual directions may call for photorealistic Indian settings, people, objects or abstract animation. Follow the exact direction; never replace an abstract visual with an unrelated portrait.",
+    "- When a person or real-world setting is relevant, use natural-looking Indian people and an authentic contemporary Indian environment. Avoid generic Western stock-photo styling and stereotypes.",
+    "- Do not force people into a scene. If the direction says abstract, symbolic, graphic or object-only, keep it that way.",
+    "- Use scene-specific shot types and camera moves that match the subject. A wide shot must establish the setting; a close-up must frame the subject closely.",
+    "- Do not ask the image model to draw captions or lettering; the editor overlays Hindi text.",
     "- Use the Devanagari voiceover as exact narration text. Do not include scene headings inside voiceover.",
     "",
     "SAFETY AND ACCURACY",
@@ -757,7 +768,7 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
       model: GEMINI_TEXT_MODEL,
       input: prompt,
       response_format: { type: "text", mime_type: "application/json", schema },
-      generation_config: { max_output_tokens: 1400 }
+      generation_config: { max_output_tokens: 2400 }
     });
     const text = getModelText(payload);
     if (!text) return res.status(502).json({ error: "Gemini ने खाली script response दिया।" });
@@ -780,13 +791,13 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
           "Correct this video script. Its Hindi has been written in Roman letters.",
           "Rewrite title, hook, voiceover, every scene dialogue, every subtitle and CTA in natural Hindi using Devanagari script.",
           "Never use Roman Hindi. Common English words and acronyms may remain, but keep English below 10 percent.",
-          "Keep visual_direction in English. Preserve the topic and meaning. Keep the selected duration and exactly 3 scenes.",
+          "Keep visual_direction in English. Preserve the topic and meaning. Keep the selected duration of " + job.duration + " seconds and exactly " + expectedSceneCount + " scenes. Their integer durations must add up to " + job.duration + " seconds.",
           "Return JSON only, following this schema: " + JSON.stringify(schema),
           "SCRIPT TO CORRECT:",
           JSON.stringify(scriptData)
         ].join("\\n"),
         response_format: { type: "text", mime_type: "application/json", schema },
-        generation_config: { max_output_tokens: 1400 }
+        generation_config: { max_output_tokens: 2400 }
       });
       const correctedText = getModelText(correction);
       try {
@@ -805,6 +816,14 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
     if (languageIssues.length) {
       return res.status(422).json({
         error: "Script में कुछ Hindi text अभी भी Roman letters में है। Generate Script फिर दबाएँ। प्रभावित हिस्से: " + languageIssues.slice(0, 4).join(", ")
+      });
+    }
+
+    if (scriptData.scenes.length !== expectedSceneCount) {
+      return res.status(422).json({
+        error: "इस " + job.duration + " सेकंड के video के लिए " + expectedSceneCount +
+          " scenes चाहिए। Generated script में " + scriptData.scenes.length +
+          " scenes मिले। Generate Script फिर दबाएँ।"
       });
     }
 
