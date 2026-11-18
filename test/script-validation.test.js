@@ -32,6 +32,13 @@ test("rejects a script with the wrong number of scenes", () => {
   assert.ok(validateScriptData(script, 20).some(issue => issue.includes("exactly 3 scenes")));
 });
 
+test("rejects a scene missing production shot instructions", () => {
+  const script = validScript();
+  delete script.scenes[0].camera_movement;
+  const issues = validateScriptData(script, 30);
+  assert.ok(issues.some(issue => issue.includes("camera_movement")));
+});
+
 test("rejects missing scene copy and invalid subtitle segments", () => {
   const script = validScript();
   script.scenes[1].dialogue = " ";
