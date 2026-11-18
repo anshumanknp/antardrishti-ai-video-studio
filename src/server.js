@@ -537,9 +537,8 @@ app.post("/api/jobs/:id/buffer/queue", async (req, res) => {
       .find(item => item.id === channelId);
     if (!channel) return res.status(400).json({ error: "Selected Buffer channel आपके connected account में नहीं मिला।" });
 
-    const platformCopy = req.body?.platformCopy && typeof req.body.platformCopy === "object"
-      ? req.body.platformCopy
-      : job.platformCopy;
+    // Always publish the saved copy that was reviewed and approved; ignore unsaved browser edits.
+    const platformCopy = job.platformCopy;
     const input = buildBufferVideoPostInput({
       channel,
       videoUrl,
