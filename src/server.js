@@ -1189,7 +1189,9 @@ app.patch("/api/jobs/:id", (req, res) => {
   for (const [key, value] of Object.entries(req.body || {})) {
     if (allowedStrings.has(key) && typeof value === "string") job[key] = value.slice(0, 30000);
   }
-  if (req.body?.platformCopy && typeof req.body.platformCopy === "object" && !Array.isArray(req.body.platformCopy)) {
+  if (req.body?.platformCopy === null) {
+    job.platformCopy = null;
+  } else if (req.body?.platformCopy && typeof req.body.platformCopy === "object" && !Array.isArray(req.body.platformCopy)) {
     const copy = {};
     for (const key of ["facebookCaption", "instagramCaption", "youtubeTitle", "youtubeDescription"]) {
       const value = req.body.platformCopy[key];
