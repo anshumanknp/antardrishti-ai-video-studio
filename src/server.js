@@ -391,14 +391,27 @@ async function callBufferApi(query, variables = {}) {
     throw error;
   }
 
-  const response = await fetch("https://api.buffer.com", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: "Bearer " + BUFFER_API_KEY
-    },
-    body: JSON.stringify({ query, variables })
-  });
+  let response;
+  try {
+    response = await fetch("https://api.buffer.com", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer " + BUFFER_API_KEY
+      },
+      body: JSON.stringify({ query, variables }),
+      signal: AbortSignal.timeout(25000)
+    });
+  } catch (error) {
+    if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+      const timeoutError = new Error("Buffer API ने 25 seconds में जवाब नहीं दिया। Network और Buffer API status जाँचें, फिर एक बार कोशिश करें।");
+      timeoutError.status = 504;
+      throw timeoutError;
+    }
+    const networkError = new Error("Buffer API से connection नहीं बना: " + String(error?.message || "Network error").slice(0, 180));
+    networkError.status = 502;
+    throw networkError;
+  }
 
   let payload;
   try { payload = await response.json(); }
@@ -459,6 +472,7 @@ app.get("/api/buffer/status", async (_req, res) => {
       }
     });
   } catch (error) {
+    console.error("[buffer-status] " + (error.message || "Unknown connection error"));
     res.status(error.status || 502).json({
       configured: true,
       connected: false,
@@ -536,6 +550,7 @@ app.post("/api/jobs/:id/generate-social-copy", async (req, res) => {
     writeJobs(jobs);
     res.json({ ok: true, platformCopy: copy, job });
   } catch (error) {
+    console.error("[social-copy] " + (error.message || "Unknown Gemini error"));
     res.status(error.status || 502).json({
       error: error.message || "Social Media Pack generate नहीं हो पाया।"
     });
@@ -726,6 +741,7 @@ app.post("/api/jobs/:id/buffer/queue-all", async (req, res) => {
           dueAt: action.post.dueAt || null
         });
       } catch (error) {
+        console.error("[buffer-queue] " + String(channel.service || "channel") + ": " + (error.message || "Queue failed"));
         failures.push({
           channelId: channel.id,
           channelName: channel.name,
@@ -750,6 +766,7 @@ app.post("/api/jobs/:id/buffer/queue-all", async (req, res) => {
       job
     });
   } catch (error) {
+    console.error("[buffer-queue-all] " + (error.message || "Unknown queue error"));
     res.status(error.status || 502).json({
       error: error.message || "Buffer से channel list या queue request पूरी नहीं हो सकी।"
     });

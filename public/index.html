@@ -683,7 +683,7 @@
   }
 
   async function loadJobs() {
-    const response = await fetch("/api/jobs");
+    const response = await fetch("/api/jobs", { signal: AbortSignal.timeout(15000) });
     if (!response.ok) throw new Error("Queue could not be loaded.");
     jobs = await response.json();
     renderStats();
@@ -1303,7 +1303,8 @@
     document.getElementById("socialCopyNote").textContent = "Facebook, Instagram और YouTube copy बन रही है…";
     try {
       const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/generate-social-copy", {
-        method: "POST"
+        method: "POST",
+        signal: AbortSignal.timeout(70000)
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Social copy generate नहीं हुई।");
@@ -1314,7 +1315,10 @@
       await loadJobs();
       document.getElementById("socialCopyNote").textContent = "तीनों platforms की copy generate और save हो गई। जरूरत हो तो edit करके Save करें।";
     } catch (error) {
-      document.getElementById("socialCopyNote").textContent = error.message || "Social copy generate नहीं हुई।";
+      const message = error?.name === "TimeoutError" || error?.name === "AbortError"
+        ? "Caption generation में 70 seconds लग गए और request रोक दी गई। PowerShell server log देखें; फिर एक बार कोशिश करें।"
+        : error.message || "Social copy generate नहीं हुई।";
+      document.getElementById("socialCopyNote").textContent = message;
     } finally {
       button.disabled = !activeScriptData;
       button.textContent = "Generate Captions & Titles";
@@ -1361,7 +1365,7 @@
     button.textContent = "Checking Buffer…";
     setBufferStatus("Connecting…");
     try {
-      const response = await fetch("/api/buffer/status");
+      const response = await fetch("/api/buffer/status", { signal: AbortSignal.timeout(40000) });
       const result = await response.json();
       if (!response.ok || !result.connected) {
         bufferChannels = [];
@@ -1428,7 +1432,19 @@
 
     const uploadEndpoint = "https://api.cloudinary.com/v1_1/" +
       encodeURIComponent(cloudinaryConfig.cloudName) + "/video/upload";
-    const uploadResponse = await fetch(uploadEndpoint, { method: "POST", body: formData });
+    let uploadResponse;
+    try {
+      uploadResponse = await fetch(uploadEndpoint, {
+        method: "POST",
+        body: formData,
+        signal: AbortSignal.timeout(180000)
+      });
+    } catch (error) {
+      if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+        throw new Error("Cloudinary upload में 3 minutes लग गए और request रोक दी गई। Video size, internet और Upload Preset जाँचें।");
+      }
+      throw new Error("Cloudinary से connection नहीं बना: " + String(error?.message || "Network error").slice(0, 180));
+    }
     const uploadResult = await uploadResponse.json().catch(() => ({}));
     if (!uploadResponse.ok) {
       throw new Error(uploadResult.error?.message || "Cloudinary upload नहीं हो पाया। Upload preset और file-size limit जाँचें।");
@@ -1450,7 +1466,8 @@
     const saveResponse = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/buffer/media", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ videoUrl })
+      body: JSON.stringify({ videoUrl }),
+      signal: AbortSignal.timeout(15000)
     });
     const saved = await saveResponse.json();
     if (!saveResponse.ok) throw new Error(saved.error || "Hosted video URL job में save नहीं हो पाया।");
@@ -1498,7 +1515,8 @@
           channelIds,
           videoUrl,
           isAiGenerated: document.getElementById("bufferAiDisclosure").checked
-        })
+        }),
+        signal: AbortSignal.timeout(110000)
       });
       const result = await response.json();
       if (!response.ok && !(Number(result.queuedCount) > 0)) {
@@ -1524,7 +1542,9 @@
         (Number(result.failedCount || 0) ? ". Failed: " + failedNames.join(" | ") : ".");
       resultHost.classList.toggle("error", Number(result.failedCount || 0) > 0);
     } catch (error) {
-      resultHost.textContent = error.message || "Buffer publishing पूरा नहीं हो पाया।";
+      resultHost.textContent = error?.name === "TimeoutError" || error?.name === "AbortError"
+        ? "Publishing में 110 seconds लग गए और request रोक दी गई। PowerShell server log में [buffer-queue] error देखें; queue history जाँचकर ही retry करें।"
+        : error.message || "Buffer publishing पूरा नहीं हो पाया।";
       resultHost.classList.add("error");
     } finally {
       button.textContent = "Queue to Selected Channels";
