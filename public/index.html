@@ -1517,8 +1517,11 @@
       canvas.width = 1080;
       canvas.height = 1920;
       const context = canvas.getContext("2d");
-      const introSec = 3;
-      const outroSec = 3;
+      const targetDuration = [15, 30, 45, 60].includes(Number(activeJob.duration))
+        ? Number(activeJob.duration)
+        : 45;
+      const introSec = targetDuration <= 15 ? 1.2 : targetDuration <= 30 ? 1.8 : targetDuration <= 45 ? 2.2 : 2.5;
+      const outroSec = introSec;
       let audioBuffer = null;
       let audioContext = null;
 
@@ -1534,10 +1537,15 @@
         }
       }
 
-      const totalSec = audioBuffer
-        ? audioBuffer.duration + 1.2
-        : Number(activeJob.duration || 45);
-      const contentSec = Math.max(5, totalSec - introSec - outroSec);
+      const voiceTolerance = Math.max(2, targetDuration * 0.08);
+      if (audioBuffer && Math.abs(audioBuffer.duration - targetDuration) > voiceTolerance) {
+        throw new Error(
+          "Generated voice " + audioBuffer.duration.toFixed(1) + " sec की है, जबकि video " +
+          targetDuration + " sec का चुना गया है। Voiceover edit करके Generate Hindi Voice दोबारा करें।"
+        );
+      }
+      const totalSec = targetDuration;
+      const contentSec = Math.max(3, totalSec - introSec - outroSec);
       const totalWeight = scenes.reduce((sum, scene) => sum + Math.max(1, Number(scene.duration_sec || 5)), 0);
       const slides = [
         { type: "intro", duration: introSec, title: activeScriptData.title, body: activeScriptData.hook }
@@ -1552,6 +1560,11 @@
             ? scene.subtitle_segments
             : [scene.subtitle || scene.dialogue || ""].filter(Boolean),
           visual: scene.visual_direction || "",
+          subtitle: scene.subtitle || "",
+          shotType: scene.shot_type || "medium shot",
+          cameraMovement: scene.camera_movement || "gentle push-in",
+          transition: scene.transition || "hard cut",
+          audioCue: scene.audio_cue || "",
           imageUrl: (activeJob.sceneImages || []).find(image => image.sceneIndex === index)?.url || ""
         });
       });
@@ -1617,11 +1630,27 @@
           const image = slide.imageElement;
           const progress = Math.min(1, Math.max(0, elapsed / Math.max(0.1, slide.duration)));
           const baseScale = Math.max(w / image.width, h / image.height);
-          const motionScale = 1.015 + progress * 0.045;
+          const movement = String(slide.cameraMovement || "").toLowerCase();
+          const framing = String(slide.shotType || "").toLowerCase();
+          let startScale = 1.015;
+          let endScale = 1.06;
+          if (/push.?in|zoom.?in|dolly.?in/.test(movement)) {
+            startScale = 1.0;
+            endScale = 1.12;
+          } else if (/pull.?out|zoom.?out|dolly.?out/.test(movement)) {
+            startScale = 1.12;
+            endScale = 1.0;
+          }
+          const framingScale = /close.?up|detail/.test(framing) ? 1.1 : /wide/.test(framing) ? 1.0 : 1.03;
+          const motionScale = framingScale * (startScale + (endScale - startScale) * progress);
           const imageWidth = image.width * baseScale * motionScale;
           const imageHeight = image.height * baseScale * motionScale;
-          const driftX = Math.sin(progress * Math.PI) * 18;
-          const driftY = (0.5 - progress) * 14;
+          let driftX = Math.sin(progress * Math.PI) * 18;
+          let driftY = (0.5 - progress) * 14;
+          if (/pan left|move left|tracking left/.test(movement)) driftX += progress * 82;
+          else if (/pan right|move right|tracking right/.test(movement)) driftX -= progress * 82;
+          if (/tilt up|move up/.test(movement)) driftY += progress * 70;
+          else if (/tilt down|move down/.test(movement)) driftY -= progress * 70;
           context.drawImage(
             image,
             (w - imageWidth) / 2 + driftX,
@@ -1640,19 +1669,6 @@
           context.fillRect(0, 0, w, h);
         }
 
-        if (!slide.imageElement) {
-          context.globalAlpha = 0.23;
-          context.fillStyle = "#d8ad68";
-          context.beginPath();
-          context.arc(860 + Math.sin(elapsed * 0.5) * 25, 300, 210, 0, Math.PI * 2);
-          context.fill();
-          context.globalAlpha = 0.18;
-          context.beginPath();
-          context.arc(130, 1420, 300, 0, Math.PI * 2);
-          context.fill();
-          context.globalAlpha = 1;
-        }
-
         if (slide.imageElement) {
           const headerShade = context.createLinearGradient(0, 0, 0, 265);
           headerShade.addColorStop(0, "rgba(7, 15, 28, 0.94)");
@@ -1662,16 +1678,16 @@
         }
         context.fillStyle = "#e0bd7b";
         context.font = "600 30px Arial, 'Noto Sans Devanagari', sans-serif";
-        context.fillText("ANTARDRISHTI", 76, 112);
+        context.fillText("ANTARDRISHTI", 76, 292);
         context.fillStyle = "#d5dfeb";
         context.font = "24px Arial, 'Noto Sans Devanagari', sans-serif";
-        context.fillText("आत्म-जागरूकता", 78, 158);
+        context.fillText("आत्म-जागरूकता", 78, 338);
 
         context.strokeStyle = "#8f7349";
         context.lineWidth = 3;
         context.beginPath();
-        context.moveTo(78, 205);
-        context.lineTo(1002, 205);
+        context.moveTo(78, 375);
+        context.lineTo(920, 375);
         context.stroke();
 
         drawBrandLogo(context, w, h);
@@ -1701,9 +1717,14 @@
             Math.floor((Math.max(0, elapsed) / Math.max(0.1, slide.duration)) * sceneCaptions.length)
           );
           const activeCaption = sceneCaptions[captionIndex] || slide.body || "";
+          if (slide.subtitle) {
+            context.fillStyle = "#e2bd78";
+            context.font = "600 40px Arial, 'Noto Sans Devanagari', sans-serif";
+            wrapCanvasText(context, slide.subtitle, 78, 680, 900, 58, 2);
+          }
           context.fillStyle = "#f5f1e9";
           context.font = "600 58px Arial, 'Noto Sans Devanagari', sans-serif";
-          wrapCanvasText(context, activeCaption, 78, 730, 900, 84, 6);
+          wrapCanvasText(context, activeCaption, 78, slide.subtitle ? 825 : 760, 900, 84, 6);
           if (!slide.imageElement) {
             context.save();
             context.globalAlpha = 0.18;
@@ -1716,17 +1737,11 @@
             }
             context.restore();
           }
-          context.fillStyle = "#aab9cb";
-          context.font = "26px Arial, 'Noto Sans Devanagari', sans-serif";
-          context.fillText("आत्मचिंतन  ·  जागरूकता  ·  सीख", 78, 1510);
+
         }
 
-        context.fillStyle = "#b5c0cf";
-        context.font = "24px Arial, sans-serif";
-        context.font = "24px Arial, 'Noto Sans Devanagari', sans-serif";
-        context.fillText("आत्मचिंतन  ·  मन की समझ  ·  सीख", 78, 1790);
         context.fillStyle = "#d8b576";
-        context.fillRect(78, 1830, 924 * ((slideIndex + 1) / slides.length), 5);
+        context.fillRect(78, 1500, 760 * ((slideIndex + 1) / slides.length), 5);
       }
 
       function renderAt(elapsedSec) {
