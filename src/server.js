@@ -1185,8 +1185,11 @@ app.post("/api/jobs/:id/generate-voice", async (req, res) => {
     }
 
     const audioDurationSec = pcm.length / (24000 * 2);
-    const durationToleranceSec = Math.max(2, Number(job.duration || 45) * 0.08);
-    const durationMatchesTarget = Math.abs(audioDurationSec - Number(job.duration || 45)) <= durationToleranceSec;
+    const targetDurationSec = Number(job.duration || 45);
+    const durationToleranceSec = Math.max(2, targetDurationSec * 0.08);
+    const durationMatchesTarget =
+      audioDurationSec >= targetDurationSec - durationToleranceSec &&
+      audioDurationSec <= targetDurationSec + 0.05;
     const wav = pcmToWav(pcm, 24000);
     const safeFile = job.id + ".wav";
     fs.writeFileSync(path.join(OUTPUT_DIR, safeFile), wav);
