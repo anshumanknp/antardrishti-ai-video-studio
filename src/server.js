@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { readJobs as readJobStore, writeJobs as writeJobStore } from "./job-store.js";
 import { getRecommendedSceneCount, preserveSceneProductionFields, validateScriptData } from "./script-validation.js";
 import { buildCloudflareScenePrompt } from "./image-prompt.js";
+import { getAlternateShotType, getVideoVisualPlan, getVisualImageTargets } from "./visual-plan.js";
 import { buildBufferVideoPostInput } from "./buffer-api.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -40,7 +41,7 @@ const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || "";
 const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN || "";
 const CLOUDFLARE_IMAGE_MODEL = process.env.CLOUDFLARE_IMAGE_MODEL || "@cf/black-forest-labs/flux-1-schnell";
 const CLOUDFLARE_IMAGE_STEPS = Math.max(1, Math.min(4, Number(process.env.CLOUDFLARE_IMAGE_STEPS || 4)));
-const CLOUDFLARE_IMAGE_DAILY_LIMIT = 100;
+const CLOUDFLARE_IMAGE_DAILY_LIMIT = 30;
 const IMAGE_USAGE_FILE = path.join(DATA_DIR, "cloudflare-image-usage.json");
 const CLOUDFLARE_IMAGE_ENABLED = process.env.CLOUDFLARE_IMAGE_ENABLED === "true" &&
   Boolean(CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN);
@@ -345,10 +346,15 @@ async function callGemini(body) {
 
 function findJob(id) {
   const jobs = readJobs();
-  return { jobs, job: jobs.find(item => item.id === id) };
+  const job = jobs.find(item => item.id === id);
+  if (job?.scriptData?.scenes?.length) {
+    job.visualPlan = getVideoVisualPlan(job.duration, job.scriptData.scenes.length);
+  }
+  return { jobs, job };
 }
 
 app.get("/api/health", (_req, res) => {
+  const imageUsageToday = readImageUsage().count;
   res.json({
     ok: true,
     app: "Antardrishti AI Video Studio",
@@ -359,7 +365,9 @@ app.get("/api/health", (_req, res) => {
     imageProvider: "Cloudflare Workers AI Free Tier",
     imageModel: CLOUDFLARE_IMAGE_MODEL,
     imageDailyLimit: CLOUDFLARE_IMAGE_DAILY_LIMIT,
-    imageUsageToday: readImageUsage().count
+    imageUsageToday,
+    imageImagesRemaining: Math.max(0, CLOUDFLARE_IMAGE_DAILY_LIMIT - imageUsageToday),
+    imageLimitType: "Studio safety cap; Cloudflare Neurons quota is separate"
   });
 });
 
@@ -643,7 +651,15 @@ app.delete("/api/brand/logo", (_req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/api/jobs", (_req, res) => res.json(readJobs()));
+app.get("/api/jobs", (_req, res) => {
+  const jobs = readJobs().map(job => ({
+    ...job,
+    visualPlan: job.scriptData?.scenes?.length
+      ? getVideoVisualPlan(job.duration, job.scriptData.scenes.length)
+      : null
+  }));
+  res.json(jobs);
+});
 
 app.post("/api/jobs", (req, res) => {
   const { topic, format = "mixed", duration = 45 } = req.body || {};
@@ -846,6 +862,7 @@ app.post("/api/jobs/:id/generate-script", async (req, res) => {
     }
     job.sceneImages = [];
     job.scriptData = scriptData;
+    job.visualPlan = getVideoVisualPlan(job.duration, scriptData.scenes.length);
     job.script = scriptData.voiceover;
     job.voiceFile = "";
     job.voiceDurationSec = null;
@@ -875,34 +892,70 @@ app.post("/api/jobs/:id/generate-scene-images", async (req, res) => {
   }
 
   const scenes = job.scriptData.scenes.slice(0, 6);
+  const visualPlan = getVideoVisualPlan(job.duration, scenes.length);
+  job.visualPlan = visualPlan;
+  const allTargets = getVisualImageTargets(visualPlan);
+  const hasTargetSelection = req.body?.sceneIndex !== undefined || req.body?.variantIndex !== undefined;
+  const selectedSceneIndex = Number(req.body?.sceneIndex);
+  const selectedVariantIndex = Number(req.body?.variantIndex ?? 0);
+  if (hasTargetSelection && (
+    !Number.isInteger(selectedSceneIndex) ||
+    !Number.isInteger(selectedVariantIndex) ||
+    !allTargets.some(target => target.sceneIndex === selectedSceneIndex && target.variantIndex === selectedVariantIndex)
+  )) {
+    return res.status(400).json({ error: "Selected scene image target valid नहीं है।" });
+  }
+
+  const targets = hasTargetSelection
+    ? allTargets.filter(target => target.sceneIndex === selectedSceneIndex && target.variantIndex === selectedVariantIndex)
+    : allTargets;
   const force = req.body?.force === true;
   const existingImages = Array.isArray(job.sceneImages) ? job.sceneImages : [];
-  const savedImages = existingImages.filter(item => Number(item.sceneIndex) >= 0 && Number(item.sceneIndex) < scenes.length);
-  for (const image of existingImages) {
-    if (Number(image.sceneIndex) >= scenes.length) {
-      const fileName = path.basename(String(image.url || ""));
-      if (fileName.startsWith(job.id + "-scene-")) fs.rmSync(path.join(OUTPUT_DIR, fileName), { force: true });
-    }
-  }
+  const savedImages = existingImages.map(item => ({
+    ...item,
+    variantIndex: Number.isInteger(Number(item.variantIndex)) ? Number(item.variantIndex) : 0
+  })).filter(item =>
+    Number(item.sceneIndex) >= 0 &&
+    Number(item.sceneIndex) < scenes.length &&
+    Number(item.variantIndex) >= 0
+  );
   const results = [];
   const safeTopic = String(job.topic || "").replace(/[\r\n]+/g, " ").slice(0, 200);
 
-  try {
-    for (let index = 0; index < scenes.length; index++) {
-      const existing = savedImages.find(item => item.sceneIndex === index && item.url);
-      if (!force && existing && fs.existsSync(path.join(OUTPUT_DIR, path.basename(existing.url)))) {
-        results.push(existing);
-        continue;
-      }
+  const pendingTargets = targets.filter(target => {
+    const existing = savedImages.find(item =>
+      Number(item.sceneIndex) === target.sceneIndex &&
+      Number(item.variantIndex) === target.variantIndex &&
+      item.url
+    );
+    const existsOnDisk = existing && fs.existsSync(path.join(OUTPUT_DIR, path.basename(existing.url)));
+    return force || !existsOnDisk;
+  });
 
-      const visualDirection = String(scenes[index].visual_direction || "").trim();
-      const shotType = String(scenes[index].shot_type || "medium shot").trim();
-      const cameraMovement = String(scenes[index].camera_movement || "gentle push-in").trim();
-      const dialogueContext = String(scenes[index].dialogue || scenes[index].subtitle || "").trim().slice(0, 500);
+  if (!pendingTargets.length) {
+    return res.json({ ok: true, job, sceneImages: savedImages, generatedImages: 0, visualPlan });
+  }
+
+  try {
+    for (const target of pendingTargets) {
+      const scene = scenes[target.sceneIndex];
+      const visualDirection = String(scene.visual_direction || "").trim();
+      const originalShotType = String(scene.shot_type || "medium shot").trim();
+      const shotType = target.variantIndex === 0
+        ? originalShotType
+        : getAlternateShotType(originalShotType);
+      const cameraMovement = target.variantIndex === 0
+        ? String(scene.camera_movement || "gentle push-in").trim()
+        : "slow pan with a gentle push-in";
+      const dialogueContext = String(scene.dialogue || scene.subtitle || "").trim().slice(0, 500);
+      const variantDirection = target.variantIndex === 0
+        ? visualDirection || "Create a calm, reflective scene that matches the video topic."
+        : "Create a distinct complementary cutaway for this same scene. Keep the same subject, setting and story, but change camera angle and visual composition. Director's scene direction: " +
+          (visualDirection || "Create a calm, reflective scene that matches the video topic.");
       const prompt = buildCloudflareScenePrompt({
         topic: safeTopic,
         dialogueContext,
-        visualDirection: visualDirection || "Create a calm, reflective scene that matches the video topic.",
+        visualDirection: variantDirection,
         shotType,
         cameraMovement
       });
@@ -910,32 +963,60 @@ app.post("/api/jobs/:id/generate-scene-images", async (req, res) => {
       const generated = await generateCloudflareSceneImage(prompt);
       const extension = generated.mimeType.includes("jpeg") || generated.mimeType.includes("jpg")
         ? "jpg" : generated.mimeType.includes("webp") ? "webp" : "png";
-      const fileName = job.id + "-scene-" + (index + 1) + "." + extension;
+      const fileName = job.id + "-scene-" + (target.sceneIndex + 1) +
+        "-variant-" + (target.variantIndex + 1) + "." + extension;
       fs.writeFileSync(path.join(OUTPUT_DIR, fileName), generated.buffer);
       const item = {
-        sceneIndex: index,
+        sceneIndex: target.sceneIndex,
+        variantIndex: target.variantIndex,
+        shotType,
+        cameraMovement,
         url: "/outputs/" + fileName,
         mimeType: generated.mimeType,
         model: CLOUDFLARE_IMAGE_MODEL,
         generatedAt: new Date().toISOString()
       };
-      const priorIndex = savedImages.findIndex(image => image.sceneIndex === index);
-      if (priorIndex >= 0) savedImages[priorIndex] = item;
-      else savedImages.push(item);
+      const priorIndex = savedImages.findIndex(image =>
+        Number(image.sceneIndex) === target.sceneIndex &&
+        Number(image.variantIndex) === target.variantIndex
+      );
+      if (priorIndex >= 0) {
+        const previousFile = path.basename(String(savedImages[priorIndex].url || ""));
+        if (previousFile && previousFile !== fileName && previousFile.startsWith(job.id + "-scene-")) {
+          fs.rmSync(path.join(OUTPUT_DIR, previousFile), { force: true });
+        }
+        savedImages[priorIndex] = item;
+      } else {
+        savedImages.push(item);
+      }
       job.sceneImages = savedImages;
       job.updatedAt = new Date().toISOString();
       writeJobs(jobs);
       results.push(item);
     }
 
-    job.sceneImages = savedImages.sort((a, b) => a.sceneIndex - b.sceneIndex);
+    job.sceneImages = savedImages.sort((a, b) =>
+      Number(a.sceneIndex) - Number(b.sceneIndex) || Number(a.variantIndex) - Number(b.variantIndex)
+    );
     job.updatedAt = new Date().toISOString();
     writeJobs(jobs);
-    res.json({ ok: true, job, sceneImages: job.sceneImages });
+    res.json({
+      ok: true,
+      job,
+      sceneImages: job.sceneImages,
+      generatedImages: results.length,
+      visualPlan
+    });
   } catch (error) {
+    job.sceneImages = savedImages;
+    job.updatedAt = new Date().toISOString();
+    writeJobs(jobs);
     res.status(error.status || 502).json({
       error: error.message || "AI scene images generate नहीं हो पाईं।",
-      generatedImages: results.length
+      generatedImages: results.length,
+      job,
+      sceneImages: savedImages,
+      visualPlan
     });
   }
 });
@@ -1039,6 +1120,7 @@ app.post("/api/jobs/:id/convert-to-devanagari", async (req, res) => {
     }
 
     job.scriptData = corrected;
+    job.visualPlan = getVideoVisualPlan(job.duration, corrected.scenes.length);
     job.script = corrected.voiceover;
     job.voiceFile = "";
     job.platformCopy = null;
