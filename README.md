@@ -83,6 +83,30 @@ After Cloudflare is configured, open a video job and press **Auto Create Video (
 
 The automation stops on an API or quota error and shows the failed step. It does not fall back to a paid provider. You still review the final video and decide when to publish it.
 
+### Social media copy and Buffer queue
+
+After a Hindi script is ready, open Script Studio and select **Generate Captions & Titles**. The Studio creates and saves separate copy for:
+- Facebook caption with opening hook and hashtags
+- Instagram Reel caption with opening hook and hashtags
+- YouTube Shorts title and description with hashtags
+
+Each field can be edited and copied independently. Script regeneration or Devanagari conversion clears the old social copy so it cannot accidentally be used with a different script.
+
+#### Connect Buffer
+
+1. In Buffer, open **Settings → API** and create a personal API key.
+2. Put the key in your local `.env` file as `BUFFER_API_KEY=your_key`.
+3. Keep the key private and never commit `.env` to GitHub.
+4. Restart the Studio with `npm start`.
+5. Open Script Studio and select **Connect / Refresh Buffer**. The app reads your Buffer organizations and connected Facebook, Instagram and YouTube channels.
+6. Select a channel, provide a direct public HTTPS URL for the finished video, and select **Add Video to Buffer Queue**.
+
+The Buffer API is available on Buffer Free and paid plans. Buffer's current Free API allowance is 1,000 requests per connected channel every 30 days, up to 3,000 total requests.
+
+**Video hosting requirement:** Buffer's API does not provide a video-file upload endpoint. The video must first be hosted at a stable, direct, public HTTPS URL that remains available until the scheduled post publishes. A local `localhost` URL or a private Google Drive/Dropbox share link will not work. Cloudinary or a public Cloudflare R2 bucket can provide a suitable URL. The current integration accepts that URL in Script Studio; it does not upload the local video to a host automatically.
+
+The Buffer integration adds Reels to the Facebook and Instagram queues, and a YouTube video post with a separate title and description. YouTube is set to Public and Education category by default. The AI-generated disclosure option is enabled by default for platforms that support it. Review every post in Buffer before its scheduled time.
+
 ### Configure Cloudflare free image generation
 
 1. Create or sign in to a Cloudflare account and keep it on the Workers Free plan.
