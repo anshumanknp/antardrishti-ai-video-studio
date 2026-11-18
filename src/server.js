@@ -734,10 +734,17 @@ app.post("/api/jobs/:id/convert-to-devanagari", async (req, res) => {
             duration_sec: { type: "integer" },
             dialogue: { type: "string" },
             visual_direction: { type: "string" },
+            shot_type: { type: "string" },
+            camera_movement: { type: "string" },
+            transition: { type: "string" },
+            audio_cue: { type: "string" },
             subtitle: { type: "string" },
             subtitle_segments: { type: "array", items: { type: "string" } }
           },
-          required: ["duration_sec", "dialogue", "visual_direction", "subtitle"]
+          required: [
+            "duration_sec", "dialogue", "visual_direction", "shot_type",
+            "camera_movement", "transition", "audio_cue", "subtitle", "subtitle_segments"
+          ]
         }
       },
       cta: { type: "string" },
@@ -756,6 +763,9 @@ app.post("/api/jobs/:id/convert-to-devanagari", async (req, res) => {
         "If a scene has no subtitle_segments, create 3 or 4 short sequential Devanagari captions from its dialogue. Do not add new claims.",
         "Do not return Roman Hindi. Keep a few genuinely English words/acronyms only when natural, such as AI or PLR. Convert Hindi words such as man, aap, kya, jaante, shakti, pehchanein into मन, आप, क्या, जानते, शक्ति, पहचानें.",
         "Keep visual_direction exactly as supplied; it is an internal prompt and may remain in English.",
+        "Preserve each scene's existing shot_type, camera_movement, transition and audio_cue exactly where present. These are internal production notes and should remain concise English where originally written.",
+        "If any production note is missing in an older script, fill only that missing note with a simple practical choice based on visual_direction; do not change notes that already exist.",
+        "Keep scene order, scene count and each duration_sec unchanged. Return 3 or 4 non-empty subtitle_segments for every scene.",
         "Return only valid JSON matching this schema: " + JSON.stringify(schema),
         "EXISTING SCRIPT:",
         JSON.stringify(original)
@@ -779,6 +789,13 @@ app.post("/api/jobs/:id/convert-to-devanagari", async (req, res) => {
     if (issues.length) {
       return res.status(422).json({
         error: "कुछ हिस्से अभी भी Roman Hindi में हैं। Conversion दोबारा करें। प्रभावित हिस्से: " + issues.slice(0, 4).join(", ")
+      });
+    }
+
+    const productionIssues = validateScriptData(corrected, job.duration);
+    if (productionIssues.length) {
+      return res.status(422).json({
+        error: "Converted script का production check पास नहीं हुआ: " + productionIssues.slice(0, 5).join(" ")
       });
     }
 
