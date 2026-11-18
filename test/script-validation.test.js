@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { validateScriptData } from "../src/script-validation.js";
+import { preserveSceneProductionFields, validateScriptData } from "../src/script-validation.js";
 
 function validScript() {
   return {
@@ -21,6 +21,34 @@ function validScript() {
     }))
   };
 }
+
+test("preserves existing production metadata when converting scene text", () => {
+  const original = validScript().scenes;
+  const converted = validScript().scenes.map(scene => ({
+    duration_sec: 1,
+    dialogue: "बदला हुआ संवाद",
+    visual_direction: "Changed model prompt",
+    subtitle: "बदला हुआ कैप्शन",
+    subtitle_segments: ["एक छोटा विचार", "दूसरा छोटा विचार", "तीसरा छोटा विचार"]
+  }));
+
+  const result = preserveSceneProductionFields(converted, original);
+  result.forEach((scene, index) => {
+    assert.equal(scene.duration_sec, original[index].duration_sec);
+    assert.equal(scene.visual_direction, original[index].visual_direction);
+    assert.equal(scene.shot_type, original[index].shot_type);
+    assert.equal(scene.camera_movement, original[index].camera_movement);
+    assert.equal(scene.transition, original[index].transition);
+    assert.equal(scene.audio_cue, original[index].audio_cue);
+    assert.equal(scene.dialogue, "बदला हुआ संवाद");
+  });
+});
+
+test("does not replace newly generated production metadata when none existed", () => {
+  const converted = validScript().scenes;
+  const result = preserveSceneProductionFields(converted, []);
+  assert.deepEqual(result, converted);
+});
 
 test("accepts a complete three-scene script matching the selected duration", () => {
   assert.deepEqual(validateScriptData(validScript(), 30), []);
