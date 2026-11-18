@@ -12,6 +12,10 @@ function validScript() {
       duration_sec: 10,
       dialogue: "यह scene " + number + " का संवाद है।",
       visual_direction: "A calm cinematic visual for scene " + number,
+      shot_type: "medium shot",
+      camera_movement: "slow push-in",
+      transition: "hard cut",
+      audio_cue: "soft ambient bed",
       subtitle: "एक छोटा विचार",
       subtitle_segments: ["पहला छोटा वाक्य", "दूसरा छोटा वाक्य", "तीसरा छोटा वाक्य"]
     }))
