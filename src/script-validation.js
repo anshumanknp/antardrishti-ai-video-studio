@@ -20,7 +20,7 @@ export function validateScriptData(scriptData, expectedDuration) {
       issues.push("Scene " + number + " must be an object.");
       return;
     }
-    for (const field of ["dialogue", "visual_direction", "subtitle"]) {
+    for (const field of ["dialogue", "visual_direction", "shot_type", "camera_movement", "transition", "audio_cue", "subtitle"]) {
       if (typeof scene[field] !== "string" || !scene[field].trim()) {
         issues.push("Scene " + number + " is missing " + field + ".");
       }
