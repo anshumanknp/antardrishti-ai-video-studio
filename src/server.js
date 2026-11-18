@@ -1361,6 +1361,9 @@ app.patch("/api/jobs/:id", (req, res) => {
     job.scriptData = req.body.scriptData;
     if (typeof req.body.scriptData.voiceover === "string") job.script = nextVoiceover;
   }
+  if (job.scriptData?.scenes?.length) {
+    job.visualPlan = getVideoVisualPlan(job.duration, job.scriptData.scenes.length);
+  }
   job.updatedAt = new Date().toISOString();
   writeJobs(jobs);
   res.json(job);
