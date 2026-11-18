@@ -1312,8 +1312,10 @@
       writePlatformCopyToFields(result.platformCopy);
       renderBufferQueueHistory(activeJob);
       refreshBufferPublishControls();
-      await loadJobs();
       document.getElementById("socialCopyNote").textContent = "तीनों platforms की copy generate और save हो गई। जरूरत हो तो edit करके Save करें।";
+      // Queue refresh is secondary; never keep the Generate button in its busy state
+      // while the dashboard list reloads.
+      loadJobs().catch(error => console.warn("[social-copy-ui] Queue refresh failed:", error));
     } catch (error) {
       const message = error?.name === "TimeoutError" || error?.name === "AbortError"
         ? "Caption generation में 70 seconds लग गए और request रोक दी गई। PowerShell server log देखें; फिर एक बार कोशिश करें।"
