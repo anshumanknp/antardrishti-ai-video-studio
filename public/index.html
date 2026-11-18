@@ -1744,15 +1744,49 @@
         context.fillRect(78, 1500, 760 * ((slideIndex + 1) / slides.length), 5);
       }
 
+      let lastRenderedSlideIndex = -1;
+      let transitionFrameCanvas = null;
+
       function renderAt(elapsedSec) {
         let cursor = 0;
+        let selectedIndex = slides.length - 1;
         for (let i = 0; i < slides.length; i++) {
-          const slide = slides[i];
-          if (elapsedSec < cursor + slide.duration || i === slides.length - 1) {
-            drawSlide(slide, i, elapsedSec - cursor);
-            return;
+          if (elapsedSec < cursor + slides[i].duration || i === slides.length - 1) {
+            selectedIndex = i;
+            break;
           }
-          cursor += slide.duration;
+          cursor += slides[i].duration;
+        }
+
+        const slide = slides[selectedIndex];
+        const localElapsed = elapsedSec - cursor;
+        if (selectedIndex !== lastRenderedSlideIndex) {
+          const previousTransition = selectedIndex > 0
+            ? String(slides[selectedIndex - 1].transition || "").toLowerCase()
+            : "";
+          if (lastRenderedSlideIndex >= 0 && /dissolve|cross.?fade|fade/.test(previousTransition)) {
+            if (!transitionFrameCanvas) {
+              transitionFrameCanvas = document.createElement("canvas");
+              transitionFrameCanvas.width = canvas.width;
+              transitionFrameCanvas.height = canvas.height;
+            }
+            const transitionContext = transitionFrameCanvas.getContext("2d");
+            transitionContext.clearRect(0, 0, canvas.width, canvas.height);
+            transitionContext.drawImage(canvas, 0, 0);
+          } else {
+            transitionFrameCanvas = null;
+          }
+          lastRenderedSlideIndex = selectedIndex;
+        }
+
+        drawSlide(slide, selectedIndex, localElapsed);
+        if (transitionFrameCanvas && localElapsed < 0.45) {
+          context.save();
+          context.globalAlpha = 1 - Math.min(1, localElapsed / 0.45);
+          context.drawImage(transitionFrameCanvas, 0, 0);
+          context.restore();
+        } else {
+          transitionFrameCanvas = null;
         }
       }
 
