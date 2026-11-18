@@ -1317,7 +1317,8 @@ app.post("/api/jobs/:id/generate-voice", async (req, res) => {
       voiceModeLabel,
       audioDurationSec: job.voiceDurationSec,
       targetDurationSec: job.duration,
-      durationMatchesTarget
+      durationMatchesTarget,
+      job
     });
   } catch (error) {
     res.status(error.status || 502).json({
