@@ -8,7 +8,7 @@ import { getRecommendedSceneCount, preserveSceneProductionFields, validateScript
 import { buildCloudflareScenePrompt } from "./image-prompt.js";
 import { getAlternateShotType, getVideoVisualPlan, getVisualImageTargets } from "./visual-plan.js";
 import { classifyCloudflareImageError } from "./cloudflare-errors.js";
-import { buildBufferVideoPostInput } from "./buffer-api.js";
+import { buildBufferVideoPostInput, validatePublicVideoUrl } from "./buffer-api.js";
 import { assertBufferPublishAllowed, recordBufferQueuePost, resetBufferApprovalIfContentChanged } from "./publishing-guard.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -48,6 +48,8 @@ const IMAGE_USAGE_FILE = path.join(DATA_DIR, "cloudflare-image-usage.json");
 const CLOUDFLARE_IMAGE_ENABLED = process.env.CLOUDFLARE_IMAGE_ENABLED === "true" &&
   Boolean(CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN);
 const BUFFER_API_KEY = process.env.BUFFER_API_KEY || "";
+const CLOUDINARY_CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME || "";
+const CLOUDINARY_UPLOAD_PRESET = process.env.CLOUDINARY_UPLOAD_PRESET || "";
 const FEMALE_TTS_VOICES = new Set(["Kore", "Aoede", "Leda", "Zephyr", "Gacrux"]);
 const MALE_TTS_VOICES = new Set(["Orus", "Puck", "Charon", "Algieba", "Sadaltager"]);
 const DEFAULT_FEMALE_VOICE = "Kore";
@@ -440,7 +442,17 @@ app.get("/api/buffer/status", async (_req, res) => {
   }
   try {
     const data = await fetchBufferOrganizationsAndChannels();
-    res.json({ configured: true, connected: true, ...data });
+    res.json({
+      configured: true,
+      connected: true,
+      ...data,
+      mediaHosting: {
+        provider: "Cloudinary",
+        configured: Boolean(CLOUDINARY_CLOUD_NAME && CLOUDINARY_UPLOAD_PRESET),
+        cloudName: CLOUDINARY_CLOUD_NAME,
+        uploadPreset: CLOUDINARY_UPLOAD_PRESET
+      }
+    });
   } catch (error) {
     res.status(error.status || 502).json({
       configured: true,
@@ -464,9 +476,10 @@ app.post("/api/jobs/:id/generate-social-copy", async (req, res) => {
       facebookCaption: { type: "string" },
       instagramCaption: { type: "string" },
       youtubeTitle: { type: "string" },
-      youtubeDescription: { type: "string" }
+      youtubeDescription: { type: "string" },
+      youtubeTags: { type: "string", description: "8 to 12 comma-separated English lowercase YouTube search keyword phrases, no # symbols, under 500 characters." }
     },
-    required: ["facebookCaption", "instagramCaption", "youtubeTitle", "youtubeDescription"]
+    required: ["facebookCaption", "instagramCaption", "youtubeTitle", "youtubeDescription", "youtubeTags"]
   };
 
   try {
@@ -479,7 +492,8 @@ app.post("/api/jobs/:id/generate-social-copy", async (req, res) => {
         "All hashtags must be English lowercase words. Add a small relevant set; do not stuff hashtags.",
         "FACEBOOK: write a warm, readable caption with a strong first line, 2 short paragraphs, a clear CTA and 3 to 5 lowercase English hashtags. Aim for 50 to 90 words.",
         "INSTAGRAM: write a distinct Reel caption, not a copy of Facebook. Put a strong hook in the first line, keep it concise, include a natural CTA and 5 to 8 lowercase English hashtags. Use emojis sparingly.",
-        "YOUTUBE SHORTS: write a clear Hindi title of no more than 80 characters (never exceed 100), and a separate description of 2 to 4 short lines with a CTA and 3 to 5 lowercase English hashtags.",
+        "YOUTUBE SHORTS: write a clear Hindi title of no more than 80 characters (never exceed 100). Put the main search phrase naturally in the title and first two description lines. Write a separate description of 2 to 4 short lines with a CTA and 3 to 5 lowercase English hashtags.",
+        "YOUTUBE SEO TAGS: create 8 to 12 precise English lowercase search keyword phrases, comma-separated, no # symbols, no duplicates, no broad unrelated words, under 500 characters total. They must match the video's actual topic. Buffer's API does not expose YouTube's native tags field, so also weave the primary search phrase naturally into the title and description without keyword stuffing.",
         "Do not include platform labels, quotation marks around the copy, markdown code fences or explanations.",
         "Return only valid JSON matching this schema: " + JSON.stringify(schema),
         "VIDEO TOPIC: " + job.topic,
@@ -504,6 +518,11 @@ app.post("/api/jobs/:id/generate-social-copy", async (req, res) => {
     }
     if (copy.youtubeTitle.length > 100) {
       return res.status(422).json({ error: "YouTube title 100 characters से लंबा आया। Social Media Pack फिर generate करें।" });
+    }
+    copy.youtubeTags = copy.youtubeTags.split(",").map(tag => tag.trim().toLowerCase()).filter(Boolean)
+      .filter((tag, index, all) => all.indexOf(tag) === index).join(", ").slice(0, 500);
+    if (!copy.youtubeTags) {
+      return res.status(422).json({ error: "YouTube SEO tags खाली आए। Social Media Pack फिर generate करें।" });
     }
 
     job.platformCopy = copy;
@@ -588,6 +607,146 @@ app.post("/api/jobs/:id/buffer/queue", async (req, res) => {
   } catch (error) {
     res.status(error.status || 502).json({
       error: error.message || "Buffer Queue में post नहीं जा पाया।"
+    });
+  }
+});
+
+
+app.post("/api/jobs/:id/buffer/media", (req, res) => {
+  const { jobs, job } = findJob(req.params.id);
+  if (!job) return res.status(404).json({ error: "Video brief not found." });
+  if (job.status !== "approved") {
+    return res.status(409).json({ error: "पहले final video review करके job को Approved करें।" });
+  }
+  try {
+    const videoUrl = validatePublicVideoUrl(req.body?.videoUrl);
+    job.bufferVideoUrl = videoUrl;
+    job.updatedAt = new Date().toISOString();
+    writeJobs(jobs);
+    res.json({ ok: true, videoUrl, job });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Hosted video URL सही नहीं है।" });
+  }
+});
+
+app.delete("/api/jobs/:id/buffer/media", (req, res) => {
+  const { jobs, job } = findJob(req.params.id);
+  if (!job) return res.status(404).json({ error: "Video brief not found." });
+  delete job.bufferVideoUrl;
+  job.updatedAt = new Date().toISOString();
+  writeJobs(jobs);
+  res.json({ ok: true, job });
+});
+
+app.post("/api/jobs/:id/buffer/queue-all", async (req, res) => {
+  const { jobs, job } = findJob(req.params.id);
+  if (!job) return res.status(404).json({ error: "Video brief not found." });
+  if (!BUFFER_API_KEY) {
+    return res.status(503).json({ error: "पहले local .env में BUFFER_API_KEY जोड़ें और server restart करें।" });
+  }
+  if (job.status !== "approved") {
+    return res.status(409).json({ error: "Publishing blocked: final video और captions review करके status Approved करें।" });
+  }
+
+  const channelIds = Array.isArray(req.body?.channelIds)
+    ? [...new Set(req.body.channelIds.map(value => String(value || "").trim()).filter(Boolean))]
+    : [];
+  if (!channelIds.length) return res.status(400).json({ error: "कम-से-कम एक Buffer channel चुनें।" });
+
+  let videoUrl;
+  try {
+    videoUrl = validatePublicVideoUrl(req.body?.videoUrl || job.bufferVideoUrl);
+  } catch (error) {
+    return res.status(400).json({ error: error.message || "Public video URL सही नहीं है।" });
+  }
+
+  const platformCopy = job.platformCopy;
+  if (!platformCopy || !platformCopy.facebookCaption || !platformCopy.instagramCaption ||
+      !platformCopy.youtubeTitle || !platformCopy.youtubeDescription || !platformCopy.youtubeTags) {
+    return res.status(409).json({ error: "तीनों platforms की saved social copy और YouTube SEO pack पहले generate करके review करें।" });
+  }
+
+  try {
+    const bufferData = await fetchBufferOrganizationsAndChannels();
+    const availableChannels = bufferData.organizations.flatMap(organization => organization.channels);
+    const selectedChannels = [];
+    const failures = [];
+    for (const channelId of channelIds) {
+      const channel = availableChannels.find(item => item.id === channelId);
+      if (!channel) failures.push({ channelId, error: "यह Buffer channel connected account में नहीं मिला।" });
+      else if (!["facebook", "instagram", "youtube"].includes(String(channel.service || "").toLowerCase())) {
+        failures.push({ channelId, error: "यह platform इस publishing workflow में supported नहीं है।" });
+      } else selectedChannels.push(channel);
+    }
+
+    const mutation = `mutation CreatePost($input: CreatePostInput!) {
+      createPost(input: $input) {
+        ... on PostActionSuccess {
+          post { id text dueAt status channelId }
+        }
+        ... on MutationError { message }
+      }
+    }`;
+    const results = [];
+    for (const channel of selectedChannels) {
+      try {
+        const videoFingerprint = assertBufferPublishAllowed(job, {
+          channelId: channel.id,
+          videoUrl
+        });
+        const input = buildBufferVideoPostInput({
+          channel,
+          videoUrl,
+          platformCopy,
+          isAiGenerated: req.body?.isAiGenerated !== false
+        });
+        const result = await callBufferApi(mutation, { input });
+        const action = result.createPost;
+        if (action?.message) throw new Error(action.message);
+        if (!action?.post?.id) throw new Error("Buffer ने post ID वापस नहीं किया।");
+        recordBufferQueuePost(job, {
+          videoFingerprint,
+          postId: action.post.id,
+          channelId: channel.id,
+          channelName: channel.name,
+          platform: channel.service,
+          dueAt: action.post.dueAt || null
+        });
+        results.push({
+          queued: true,
+          postId: action.post.id,
+          channelId: channel.id,
+          channelName: channel.name,
+          platform: channel.service,
+          dueAt: action.post.dueAt || null
+        });
+      } catch (error) {
+        failures.push({
+          channelId: channel.id,
+          channelName: channel.name,
+          platform: channel.service,
+          error: error.message || "इस channel पर post queue नहीं हो पाई।"
+        });
+      }
+    }
+
+    if (results.length) {
+      job.bufferVideoUrl = videoUrl;
+      job.updatedAt = new Date().toISOString();
+      writeJobs(jobs);
+    }
+    const status = results.length === 0 ? 502 : failures.length ? 207 : 200;
+    res.status(status).json({
+      ok: results.length > 0 && failures.length === 0,
+      queuedCount: results.length,
+      failedCount: failures.length,
+      results,
+      failures,
+      job
+    });
+  } catch (error) {
+    res.status(error.status || 502).json({
+      error: error.message || "Buffer से channel list या queue request पूरी नहीं हो सकी।"
     });
   }
 });
@@ -1368,9 +1527,9 @@ app.patch("/api/jobs/:id", (req, res) => {
     job.platformCopy = null;
   } else if (req.body?.platformCopy && typeof req.body.platformCopy === "object" && !Array.isArray(req.body.platformCopy)) {
     const copy = {};
-    for (const key of ["facebookCaption", "instagramCaption", "youtubeTitle", "youtubeDescription"]) {
+    for (const key of ["facebookCaption", "instagramCaption", "youtubeTitle", "youtubeDescription", "youtubeTags"]) {
       const value = req.body.platformCopy[key];
-      if (typeof value === "string") copy[key] = value.slice(0, key === "youtubeTitle" ? 100 : 5000);
+      if (typeof value === "string") copy[key] = value.slice(0, key === "youtubeTitle" ? 100 : key === "youtubeTags" ? 500 : 5000);
     }
     job.platformCopy = copy;
   }
