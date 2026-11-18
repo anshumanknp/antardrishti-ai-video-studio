@@ -477,7 +477,7 @@
         <div class="panel-heading"><h2>Scene visuals</h2><span class="panel-kicker">AI IMAGE · 9:16</span></div>
         <p class="scene-image-note" id="imageGenerationNote">Cloudflare Workers AI free image API configure करने के बाद यहाँ से image generation चालू होगी।</p>
         <div class="modal-actions">
-          <button class="secondary-btn" id="generateImagesBtn" type="button" disabled>Generate Scene Images (Free API)</button>
+          <button class="secondary-btn" id="generateImagesBtn" type="button" disabled>Generate Missing AI Images (Free API)</button>
         </div>
         <div id="sceneImageGallery" class="scene-image-grid"></div>
         <div class="panel-heading"><h2>Scene-by-scene slide plan</h2><span class="panel-kicker">9:16 VERTICAL</span></div>
@@ -853,21 +853,115 @@
     }
   }
 
+  function getActiveVisualPlan() {
+    if (activeJob?.visualPlan?.scenes?.length) return activeJob.visualPlan;
+    const specs = {
+      15: { totalShots: 5, totalImages: 4 },
+      30: { totalShots: 8, totalImages: 6 },
+      45: { totalShots: 10, totalImages: 8 },
+      60: { totalShots: 13, totalImages: 10 }
+    };
+    const duration = Number(activeJob?.duration || 45);
+    const spec = specs[duration] || specs[45];
+    const sceneCount = Math.max(1, Math.min(6, activeScriptData?.scenes?.length || 3));
+    const distribute = total => {
+      const base = Math.floor(total / sceneCount);
+      const remainder = total % sceneCount;
+      return Array.from({ length: sceneCount }, (_, index) => base + (index < remainder ? 1 : 0));
+    };
+    const shots = distribute(spec.totalShots);
+    const images = distribute(spec.totalImages);
+    return {
+      duration,
+      totalShots: spec.totalShots,
+      totalImages: spec.totalImages,
+      scenes: shots.map((shotCount, sceneIndex) => ({
+        sceneIndex, shotCount, imageCount: images[sceneIndex]
+      }))
+    };
+  }
+
+  function getPlannedImageTargets() {
+    return getActiveVisualPlan().scenes.flatMap(scene =>
+      Array.from({ length: scene.imageCount }, (_, variantIndex) => ({
+        sceneIndex: scene.sceneIndex,
+        variantIndex
+      }))
+    );
+  }
+
+  function getImageTargetKey(sceneIndex, variantIndex) {
+    return Number(sceneIndex) + ":" + Number(variantIndex || 0);
+  }
+
+  function updateImageGenerationControls() {
+    const button = document.getElementById("generateImagesBtn");
+    if (!button) return;
+    const plan = getActiveVisualPlan();
+    const existing = Array.isArray(activeJob?.sceneImages) ? activeJob.sceneImages : [];
+    const existingKeys = new Set(existing.map(item =>
+      getImageTargetKey(item.sceneIndex, Number.isInteger(Number(item.variantIndex)) ? Number(item.variantIndex) : 0)
+    ));
+    const missing = getPlannedImageTargets().filter(target =>
+      !existingKeys.has(getImageTargetKey(target.sceneIndex, target.variantIndex))
+    ).length;
+    button.disabled = !imageGenerationEnabled || !activeScriptData || missing === 0;
+    button.textContent = !imageGenerationEnabled
+      ? "Scene Images · Not configured"
+      : missing > 0
+        ? "Generate " + missing + " Missing AI Images"
+        : "All " + plan.totalImages + " AI Images Ready";
+  }
+
   function renderSceneImageGallery(images = []) {
     const gallery = document.getElementById("sceneImageGallery");
     gallery.replaceChildren();
-    const sorted = [...images].sort((a, b) => a.sceneIndex - b.sceneIndex);
+    const sorted = [...images].sort((a, b) =>
+      Number(a.sceneIndex) - Number(b.sceneIndex) ||
+      (Number(a.variantIndex) || 0) - (Number(b.variantIndex) || 0)
+    );
     for (const item of sorted) {
+      const sceneIndex = Number(item.sceneIndex);
+      const variantIndex = Number.isInteger(Number(item.variantIndex)) ? Number(item.variantIndex) : 0;
       const card = document.createElement("div");
       card.className = "scene-image-card";
       const image = document.createElement("img");
       image.loading = "lazy";
-      image.alt = "Generated visual for scene " + (Number(item.sceneIndex) + 1);
+      image.alt = "Generated visual for scene " + (sceneIndex + 1) + ", image " + (variantIndex + 1);
       image.src = item.url + "?v=" + encodeURIComponent(item.generatedAt || "");
       const label = document.createElement("small");
-      label.textContent = "Scene " + (Number(item.sceneIndex) + 1) + " · AI generated";
-      card.append(image, label);
+      label.textContent = "Scene " + (sceneIndex + 1) + " · Visual " + (variantIndex + 1) + " · AI generated";
+      const regenerate = document.createElement("button");
+      regenerate.type = "button";
+      regenerate.className = "secondary-btn regenerate-scene-image";
+      regenerate.textContent = "Regenerate this image";
+      regenerate.addEventListener("click", () => regenerateSceneImage(sceneIndex, variantIndex, regenerate));
+      card.append(image, label, regenerate);
       gallery.append(card);
+    }
+  }
+
+  async function regenerateSceneImage(sceneIndex, variantIndex, button) {
+    if (!activeJobId || !imageGenerationEnabled) return;
+    if (!window.confirm("केवल Scene " + (sceneIndex + 1) + " की यह एक image दोबारा बनेगी। Daily free quota से 1 image इस्तेमाल होगी। आगे बढ़ें?")) return;
+    button.disabled = true;
+    button.textContent = "Regenerating…";
+    try {
+      const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/generate-scene-images", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sceneIndex, variantIndex, force: true })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Image regenerate नहीं हुई।");
+      activeJob = result.job;
+      await loadJobs();
+      displayScript(activeJob);
+      setStudioStatus("Scene " + (sceneIndex + 1) + " की selected image regenerate हो गई। बाकी images और Hindi voice सुरक्षित हैं।");
+    } catch (error) {
+      setStudioStatus(error.message || "Image regenerate नहीं हुई।", true);
+      button.disabled = false;
+      button.textContent = "Retry image";
     }
   }
 
@@ -879,15 +973,17 @@
       const health = await response.json();
       imageGenerationEnabled = response.ok && health.imageGenerationEnabled === true;
       if (imageGenerationEnabled) {
-        note.textContent = "Cloudflare Workers AI free allocation · 10,000 Neurons/day shared quota. Studio hard cap: " +
-          (health.imageDailyLimit || 150) + " images/day. Quota खत्म होने पर request रुक जाएगी; paid fallback नहीं होगा.";
+        note.textContent = "Cloudflare का 10,000 Neurons/day free allocation पूरे account में shared है। Studio safety cap: " +
+          (health.imageDailyLimit || 30) + " images/day (Cloudflare की असली Neuron limit से अलग)। इस्तेमाल: " +
+          (health.imageUsageToday || 0) + " · Studio में शेष: " + (health.imageImagesRemaining ?? 0) +
+          ". Planned AI images: " + (activeScriptData ? getActiveVisualPlan().totalImages : "script के बाद") +
+          ". Paid fallback नहीं होगा।";
       } else {
         note.textContent = "Cloudflare free image API configure नहीं है। local .env में Account ID, API Token और CLOUDFLARE_IMAGE_ENABLED=true सेट करें। अभी कोई image request नहीं भेजी जाएगी।";
       }
-      button.disabled = !imageGenerationEnabled || !activeScriptData;
-      button.textContent = imageGenerationEnabled ? "Generate / Refresh Scene Images (Free API)" : "Scene Images · Not configured";
+      updateImageGenerationControls();
       document.getElementById("autoCreateVideoBtn").disabled = !imageGenerationEnabled || !activeScriptData;
-    document.getElementById("generateSocialCopyBtn").disabled = !activeScriptData;
+      document.getElementById("generateSocialCopyBtn").disabled = !activeScriptData;
     } catch {
       imageGenerationEnabled = false;
       note.textContent = "Image API status check नहीं हो पाया। Free API configure होने तक generation बंद रहेगी।";
@@ -903,35 +999,55 @@
       setStudioStatus("Cloudflare free image API अभी configure नहीं है। .env settings जोड़कर server restart करें।", true);
       return;
     }
+
+    const targets = getPlannedImageTargets();
     const existing = Array.isArray(activeJob?.sceneImages) ? activeJob.sceneImages : [];
-    const expected = (activeScriptData.scenes || []).length;
-    const force = existing.length >= expected && expected > 0;
-    const warning = force
-      ? "मौजूदा scene images को Cloudflare Workers AI free daily quota से दोबारा generate करेंगे। Studio limit 100 images/day है। आगे बढ़ें?"
-      : "यह up to " + Math.max(0, expected - existing.length) + " scene images Cloudflare Workers AI free allocation से बनाएगा। Quota shared है; limit पूरी होने पर paid fallback नहीं होगा। आगे बढ़ें?";
-    if (!window.confirm(warning)) return;
+    const existingKeys = new Set(existing.map(item =>
+      getImageTargetKey(item.sceneIndex, Number.isInteger(Number(item.variantIndex)) ? Number(item.variantIndex) : 0)
+    ));
+    const missing = targets.filter(target =>
+      !existingKeys.has(getImageTargetKey(target.sceneIndex, target.variantIndex))
+    );
+    if (!missing.length) {
+      setStudioStatus("सभी " + targets.length + " planned AI images पहले से उपलब्ध हैं। किसी एक image को बदलने के लिए उसके नीचे Regenerate this image दबाएँ।");
+      updateImageGenerationControls();
+      return;
+    }
+
+    const approved = window.confirm(
+      "इस " + activeJob.duration + " सेकंड के video के लिए " + missing.length +
+      " missing AI images बनेंगी। कुल योजना: " + getActiveVisualPlan().totalShots +
+      " visual shots, " + getActiveVisualPlan().totalImages +
+      " AI images। मौजूदा images reuse होंगी। Studio safety cap 30 images/day है; कोई paid fallback नहीं। आगे बढ़ें?"
+    );
+    if (!approved) return;
 
     const button = document.getElementById("generateImagesBtn");
     button.disabled = true;
-    button.textContent = "Generating images…";
-    setStudioStatus("Cloudflare FLUX हर scene के लिए image बना रहा है…");
+    button.textContent = "Generating " + missing.length + " images…";
+    setStudioStatus("Cloudflare FLUX केवल missing images बना रहा है; पुरानी images और voice सुरक्षित रहेंगी…");
     try {
       const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/generate-scene-images", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ force })
+        body: JSON.stringify({ force: false })
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Scene images generate नहीं हो पाईं।");
       activeJob = result.job;
       await loadJobs();
       displayScript(activeJob);
-      setStudioStatus((result.sceneImages || []).length + " scene images तैयार हैं। अब Create Slide Video दबाएँ।");
+      setStudioStatus(
+        (result.generatedImages || 0) + " नई AI images बन गईं। " +
+        getActiveVisualPlan().totalShots + " visual shots तैयार होंगे। अब Create Slide Video दबाएँ।"
+      );
     } catch (error) {
       setStudioStatus(error.message || "Scene images generate नहीं हो पाईं।", true);
+      const latest = await fetch("/api/jobs").then(response => response.json()).catch(() => []);
+      activeJob = latest.find(item => item.id === activeJobId) || activeJob;
+      displayScript(activeJob);
     } finally {
-      button.disabled = !imageGenerationEnabled;
-      button.textContent = imageGenerationEnabled ? "Generate / Refresh Scene Images (Free API)" : "Scene Images · Not configured";
+      updateImageGenerationControls();
     }
   }
 
@@ -1008,11 +1124,19 @@
       );
 
       const currentImages = Array.isArray(activeJob.sceneImages) ? activeJob.sceneImages : [];
-      const expectedCount = (activeScriptData.scenes || []).length;
-      if (currentImages.length < expectedCount) {
+      const plannedTargets = getPlannedImageTargets();
+      const currentKeys = new Set(currentImages.map(item =>
+        getImageTargetKey(item.sceneIndex, Number.isInteger(Number(item.variantIndex)) ? Number(item.variantIndex) : 0)
+      ));
+      const missingImageCount = plannedTargets.filter(target =>
+        !currentKeys.has(getImageTargetKey(target.sceneIndex, target.variantIndex))
+      ).length;
+      if (missingImageCount > 0) {
+        const visualPlan = getActiveVisualPlan();
         const approved = window.confirm(
-          "अब up to " + (expectedCount - currentImages.length) +
-          " scene images Cloudflare Workers AI free daily allocation से बनेंगी। Studio hard cap 100 images/day है। Paid fallback नहीं है। Continue?"
+          "अब " + missingImageCount + " missing AI images Cloudflare Workers AI free allocation से बनेंगी। " +
+          visualPlan.totalShots + " visual shots के लिए कुल " + visualPlan.totalImages +
+          " images plan हैं। Studio safety cap 30 images/day है। Paid fallback नहीं है। Continue?"
         );
         if (!approved) throw new Error("Scene image generation आपने रोक दी। Script और voice save हैं; आप बाद में जारी रख सकते हैं।");
 
@@ -1243,8 +1367,7 @@
     document.getElementById("scriptCta").value = activeScriptData?.cta || "";
     writePlatformCopyToFields(job.platformCopy);
     renderSceneImageGallery(job.sceneImages || []);
-    document.getElementById("generateImagesBtn").disabled = !imageGenerationEnabled || !activeScriptData;
-    document.getElementById("generateImagesBtn").textContent = imageGenerationEnabled ? "Generate / Refresh AI Scene Images (Paid)" : "AI Scene Images · OFF";
+    updateImageGenerationControls();
     document.getElementById("voiceMode").value = job.voiceMode || "female";
     document.getElementById("femaleVoice").value = job.femaleVoice || "Kore";
     document.getElementById("maleVoice").value = job.maleVoice || "Orus";
@@ -1541,26 +1664,56 @@
         : targetDuration;
       const contentSec = Math.max(0.5, totalSec - introSec - outroSec);
       const totalWeight = scenes.reduce((sum, scene) => sum + Math.max(1, Number(scene.duration_sec || 5)), 0);
+      const visualPlan = getActiveVisualPlan();
+      const savedImages = Array.isArray(activeJob.sceneImages) ? activeJob.sceneImages : [];
       const slides = [
         { type: "intro", duration: introSec, title: activeScriptData.title, body: activeScriptData.hook }
       ];
       scenes.forEach((scene, index) => {
-        slides.push({
-          type: "scene",
-          duration: contentSec * (Math.max(1, Number(scene.duration_sec || 5)) / totalWeight),
-          title: "SCENE " + String(index + 1).padStart(2, "0"),
-          body: scene.subtitle || scene.dialogue || "",
-          captions: Array.isArray(scene.subtitle_segments) && scene.subtitle_segments.length
-            ? scene.subtitle_segments
-            : [scene.subtitle || scene.dialogue || ""].filter(Boolean),
-          visual: scene.visual_direction || "",
-          subtitle: scene.subtitle || "",
-          shotType: scene.shot_type || "medium shot",
-          cameraMovement: scene.camera_movement || "gentle push-in",
-          transition: scene.transition || "hard cut",
-          audioCue: scene.audio_cue || "",
-          imageUrl: (activeJob.sceneImages || []).find(image => image.sceneIndex === index)?.url || ""
-        });
+        const sceneWeight = Math.max(1, Number(scene.duration_sec || 5));
+        const sceneDuration = contentSec * (sceneWeight / totalWeight);
+        const scenePlan = visualPlan.scenes[index] || { shotCount: 1, imageCount: 1 };
+        const shotCount = Math.max(1, Number(scenePlan.shotCount || 1));
+        const sceneCaptions = Array.isArray(scene.subtitle_segments) && scene.subtitle_segments.length
+          ? scene.subtitle_segments
+          : [scene.subtitle || scene.dialogue || ""].filter(Boolean);
+        const sceneImages = savedImages.filter(image => Number(image.sceneIndex) === index);
+        for (let shotIndex = 0; shotIndex < shotCount; shotIndex++) {
+          const variantCount = Math.max(1, Number(scenePlan.imageCount || 1));
+          const variantIndex = shotIndex % variantCount;
+          const selectedImage = sceneImages.find(image =>
+            (Number.isInteger(Number(image.variantIndex)) ? Number(image.variantIndex) : 0) === variantIndex
+          ) || sceneImages[0] || null;
+          const captionStart = Math.min(
+            Math.max(0, sceneCaptions.length - 1),
+            Math.floor(shotIndex * sceneCaptions.length / shotCount)
+          );
+          const captionEnd = Math.min(
+            sceneCaptions.length,
+            Math.max(captionStart + 1, Math.floor((shotIndex + 1) * sceneCaptions.length / shotCount))
+          );
+          const shotCaptions = sceneCaptions.slice(captionStart, captionEnd);
+          const reusedOriginalImage = shotIndex > 0 && variantIndex === 0;
+          const alternateMovement = ["slow pan left", "slow pull-out", "slow pan right"];
+          slides.push({
+            type: "scene",
+            duration: sceneDuration / shotCount,
+            title: "SCENE " + String(index + 1).padStart(2, "0") + " · SHOT " + String(shotIndex + 1),
+            body: scene.subtitle || scene.dialogue || "",
+            captions: shotCaptions.length ? shotCaptions : [sceneCaptions[sceneCaptions.length - 1] || scene.subtitle || ""].filter(Boolean),
+            visual: scene.visual_direction || "",
+            subtitle: shotIndex === 0 ? scene.subtitle || "" : "",
+            shotType: selectedImage?.shotType || (shotIndex === 0
+              ? scene.shot_type || "medium shot"
+              : (reusedOriginalImage ? "close-up detail shot" : "wide environmental shot")),
+            cameraMovement: shotIndex === 0
+              ? selectedImage?.cameraMovement || scene.camera_movement || "gentle push-in"
+              : alternateMovement[(shotIndex - 1) % alternateMovement.length],
+            transition: shotIndex === 0 ? scene.transition || "hard cut" : "hard cut",
+            audioCue: scene.audio_cue || "",
+            imageUrl: selectedImage?.url || ""
+          });
+        }
       });
       slides.push({ type: "outro", duration: outroSec, title: "ANTARDRISHTI", body: activeScriptData.cta || "और जानने के लिए follow करें।" });
 
@@ -1909,6 +2062,7 @@
   document.getElementById("uploadBrandLogoBtn").addEventListener("click", uploadBrandLogo);
   document.getElementById("removeBrandLogoBtn").addEventListener("click", removeBrandLogo);
     document.getElementById("generateImagesBtn").addEventListener("click", generateSceneImages);
+  updateImageGenerationControls();
   document.getElementById("autoCreateVideoBtn").addEventListener("click", autoCreateVideo);
   document.getElementById("renderVideoBtn").addEventListener("click", createSlideVideo);
 
