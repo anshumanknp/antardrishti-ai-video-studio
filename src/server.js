@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import { readJobs as readJobStore, writeJobs as writeJobStore } from "./job-store.js";
-import { validateScriptData } from "./script-validation.js";
+import { preserveSceneProductionFields, validateScriptData } from "./script-validation.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -784,6 +784,8 @@ app.post("/api/jobs/:id/convert-to-devanagari", async (req, res) => {
     if (!corrected.title || !corrected.voiceover || !Array.isArray(corrected.scenes)) {
       return res.status(502).json({ error: "Conversion में जरूरी script fields नहीं मिले।" });
     }
+
+    corrected.scenes = preserveSceneProductionFields(corrected.scenes, original.scenes);
 
     const issues = devanagariIssues(corrected);
     if (issues.length) {
