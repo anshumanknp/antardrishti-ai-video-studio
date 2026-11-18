@@ -1224,6 +1224,14 @@
       : "Publishing बंद है। पहले final video और captions जाँचें, फिर dashboard में इस job का status Approved करें।";
   }
 
+  function isCurrentPlatformCopySaved() {
+    const current = readPlatformCopyFromFields();
+    const saved = activeJob?.platformCopy || {};
+    return Object.keys(current).every(field =>
+      current[field] === String(saved[field] || "").trim()
+    );
+  }
+
   async function copySocialField(fieldId, label) {
     const value = document.getElementById(fieldId).value.trim();
     if (!value) {
@@ -1262,6 +1270,8 @@
       if (!response.ok) throw new Error(result.error || "Social copy generate नहीं हुई।");
       activeJob = result.job;
       writePlatformCopyToFields(result.platformCopy);
+      renderBufferQueueHistory(activeJob);
+      refreshBufferPublishControls();
       await loadJobs();
       document.getElementById("socialCopyNote").textContent = "तीनों platforms की copy generate और save हो गई। जरूरत हो तो edit करके Save करें।";
     } catch (error) {
@@ -1286,6 +1296,8 @@
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Social copy save नहीं हुई।");
       activeJob = result;
+      renderBufferQueueHistory(activeJob);
+      refreshBufferPublishControls();
       await loadJobs();
       document.getElementById("socialCopyNote").textContent = "Edited social copy इस Job में save हो गई।";
     } catch (error) {
@@ -1372,6 +1384,11 @@
       resultHost.classList.add("error");
       return;
     }
+    if (!isCurrentPlatformCopySaved()) {
+      resultHost.textContent = "Platform copy में unsaved changes हैं। पहले Save Social Copy करें, फिर job को दोबारा Approved करें।";
+      resultHost.classList.add("error");
+      return;
+    }
     button.disabled = true;
     button.textContent = "Sending to Buffer…";
     resultHost.classList.remove("error");
@@ -1437,6 +1454,7 @@
   }
 
   async function openScriptStudio(jobId) {
+    document.getElementById("bufferVideoUrl").value = "";
     refreshBufferChannels();
     activeJobId = jobId;
     activeJob = jobs.find(job => job.id === jobId) || null;
@@ -1529,6 +1547,7 @@
         writePlatformCopyToFields(null);
         document.getElementById("socialCopyNote").textContent = "Script बदली है। नई platform copy generate करें।";
       }
+      refreshBufferPublishControls();
       await loadJobs();
       setStudioStatus("आपके script edits save हो गए।");
     } catch (error) {
@@ -1604,9 +1623,13 @@
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Voice generation failed.");
-      activeJob.voiceFile = result.voiceFile;
-      activeJob.voiceDurationSec = result.audioDurationSec;
-      activeJob.voiceDurationMatchesTarget = result.durationMatchesTarget;
+      if (result.job) activeJob = result.job;
+      else {
+        activeJob.voiceFile = result.voiceFile;
+        activeJob.voiceDurationSec = result.audioDurationSec;
+        activeJob.voiceDurationMatchesTarget = result.durationMatchesTarget;
+      }
+      refreshBufferPublishControls();
       voicePlayer.src = result.voiceFile + "?v=" + Date.now();
       voicePlayer.hidden = false;
       await loadJobs();
