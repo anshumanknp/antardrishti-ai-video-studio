@@ -1,13 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildBufferVideoPostInput } from "../src/buffer-api.js";
+import { buildBufferVideoPostInput, validatePublicVideoUrl } from "../src/buffer-api.js";
 
 const videoUrl = "https://cdn.example.com/short.mp4";
 const copy = {
   facebookCaption: "Facebook caption #selfawareness",
   instagramCaption: "Instagram caption #mindfulness",
   youtubeTitle: "मन को समझने का आसान तरीका",
-  youtubeDescription: "YouTube description #selfawareness"
+  youtubeDescription: "YouTube description #selfawareness",
+  youtubeTags: "self awareness, mindfulness, hindi motivation"
 };
 
 test("builds a Facebook Reel queue post with a hosted video", () => {
@@ -49,6 +50,17 @@ test("builds a YouTube post with a separate title and education category", () =>
   assert.equal(input.text, copy.youtubeDescription);
 });
 
+test("keeps the generated YouTube SEO tag pack with the saved copy while Buffer receives title and description", () => {
+  const input = buildBufferVideoPostInput({
+    channel: { id: "yt-1", service: "youtube" },
+    videoUrl,
+    platformCopy: copy
+  });
+  assert.equal(input.metadata.youtube.title, copy.youtubeTitle);
+  assert.equal(input.text, copy.youtubeDescription);
+  assert.equal("tags" in input.metadata.youtube, false);
+});
+
 test("rejects local or non-HTTPS media URLs", () => {
   assert.throws(() => buildBufferVideoPostInput({
     channel: { id: "fb-1", service: "facebook" },
@@ -88,4 +100,10 @@ test("rejects an empty caption and overlong YouTube title", () => {
       youtubeDescription: "Description"
     }
   }), /100 characters or fewer/i);
+});
+
+test("validates and returns a direct public HTTPS media URL", () => {
+  assert.equal(validatePublicVideoUrl(videoUrl), videoUrl);
+  assert.throws(() => validatePublicVideoUrl("https://localhost/video.mp4"), /Private or local/i);
+  assert.throws(() => validatePublicVideoUrl("https://user:pass@example.com/video.mp4"), /without login credentials/i);
 });
