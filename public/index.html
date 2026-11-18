@@ -1006,7 +1006,6 @@
       }
       updateImageGenerationControls();
       document.getElementById("autoCreateVideoBtn").disabled = !imageGenerationEnabled || !activeScriptData;
-      document.getElementById("generateSocialCopyBtn").disabled = !activeScriptData;
     } catch {
       imageGenerationEnabled = false;
       note.textContent = "Image API status check नहीं हो पाया। Free API configure होने तक generation बंद रहेगी।";
@@ -1557,6 +1556,8 @@
   function displayScript(job) {
     activeJob = job;
     activeScriptData = job.scriptData || null;
+    // Caption generation depends on the loaded script, not on the startup health check.
+    document.getElementById("generateSocialCopyBtn").disabled = !activeScriptData;
     if (!job.renderedVideoFile && currentVideoJobId === job.id && currentVideoSavedLocally) {
       if (currentVideoUrl) URL.revokeObjectURL(currentVideoUrl);
       currentVideoUrl = null;
