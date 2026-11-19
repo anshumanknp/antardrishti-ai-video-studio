@@ -11,6 +11,8 @@ import { classifyCloudflareImageError } from "./cloudflare-errors.js";
 import { buildBufferVideoPostInput, validatePublicVideoUrl, validateScheduledAt } from "./buffer-api.js";
 import { buildRenderedVideoFileName, getRenderedVideoExtension } from "./rendered-video.js";
 import { assertBufferPublishAllowed, recordBufferQueuePost, resetBufferApprovalIfContentChanged } from "./publishing-guard.js";
+import { renderJobVideo } from "./render-engine.js";
+import { createRenderQueue } from "./render-queue.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -366,6 +368,15 @@ function findJob(id) {
   }
   return { jobs, job };
 }
+
+
+const renderQueue = createRenderQueue({
+  readJobs,
+  writeJobs,
+  renderVideo: renderJobVideo,
+  outputDir: OUTPUT_DIR,
+  dataDir: DATA_DIR
+});
 
 app.get("/api/health", (_req, res) => {
   const imageUsageToday = readImageUsage().count;
@@ -1350,6 +1361,21 @@ app.post("/api/jobs", (req, res) => {
   res.status(201).json(job);
 });
 
+app.post("/api/jobs/:id/render", (req, res) => {
+  try {
+    const job = renderQueue.enqueue(req.params.id);
+    res.status(202).json({ ok: true, job, render: renderQueue.getStatus(job.id) });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || "Server render queue में job नहीं जोड़ी जा सकी।" });
+  }
+});
+
+app.get("/api/jobs/:id/render-status", (req, res) => {
+  const render = renderQueue.getStatus(req.params.id);
+  if (!render) return res.status(404).json({ error: "Video brief not found." });
+  res.json({ ok: true, render });
+});
+
 app.put("/api/jobs/:id/rendered-video", express.raw({ type: "video/*", limit: "250mb" }), async (req, res) => {
   const { jobs, job } = findJob(req.params.id);
   if (!job) return res.status(404).json({ error: "Video brief not found." });
@@ -2094,4 +2120,5 @@ app.patch("/api/jobs/:id", (req, res) => {
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log("Antardrishti Studio running on port " + PORT + " (local network enabled)");
+  renderQueue.resume();
 });
