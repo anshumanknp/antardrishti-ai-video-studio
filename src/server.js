@@ -36,8 +36,8 @@ loadLocalEnv();
 
 const app = express();
 const PORT = Number(process.env.PORT || 3460);
-const DATA_DIR = path.join(__dirname, "..", "data");
-const OUTPUT_DIR = path.join(__dirname, "..", "outputs");
+const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, "..", "data"));
+const OUTPUT_DIR = path.resolve(process.env.OUTPUT_DIR || path.join(__dirname, "..", "outputs"));
 const JOBS_FILE = path.join(DATA_DIR, "jobs.json");
 const BRAND_LOGO_META_FILE = path.join(DATA_DIR, "brand-logo.json");
 const GEMINI_TEXT_MODEL = "gemini-3.8-flash";
