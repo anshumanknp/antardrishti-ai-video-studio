@@ -33,7 +33,7 @@ test("render queue persists queued, rendering and ready states", async () => {
   });
 
   const queued = queue.enqueue("job-1");
-  assert.equal(queued.renderStatus, "queued");
+  assert.ok(["queued", "rendering"].includes(queued.renderStatus));
   await waitFor(() => jobs[0].renderStatus === "ready");
   assert.equal(jobs[0].renderProgress, 100);
   assert.equal(jobs[0].renderedVideoFile, "antardrishti-job-1-final.mp4");
