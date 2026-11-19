@@ -1,0 +1,30 @@
+[Unit]
+Description=Antardrishti AI Video Studio
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=antardrishti
+Group=antardrishti
+WorkingDirectory=/opt/antardrishti/app
+EnvironmentFile=/etc/antardrishti/studio.env
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=3460
+Environment=DATA_DIR=/var/lib/antardrishti/data
+Environment=OUTPUT_DIR=/var/lib/antardrishti/outputs
+Environment=FFMPEG_PATH=/usr/bin/ffmpeg
+Environment=RENDER_CONCURRENCY=1
+ExecStart=/usr/bin/node src/server.js
+Restart=always
+RestartSec=5
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/antardrishti
+
+[Install]
+WantedBy=multi-user.target
