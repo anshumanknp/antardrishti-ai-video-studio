@@ -21,6 +21,11 @@ jobs:
         run: npm install --ignore-scripts
       - name: Check server JavaScript syntax
         run: node --check src/server.js
+      - name: Check cloud renderer and queue JavaScript syntax
+        run: |
+          node --check src/cloud-renderer.js
+          node --check src/render-queue.js
+          bash -n scripts/oracle-bootstrap.sh
       - name: Check dashboard inline JavaScript syntax
         run: |
           node --input-type=module -e '
