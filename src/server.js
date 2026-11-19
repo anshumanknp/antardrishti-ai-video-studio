@@ -2,7 +2,7 @@ import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHmac, timingSafeEqual } from "node:crypto";
 import { readJobs as readJobStore, writeJobs as writeJobStore } from "./job-store.js";
 import { getRecommendedSceneCount, preserveSceneProductionFields, validateScriptData } from "./script-validation.js";
 import { buildCloudflareScenePrompt } from "./image-prompt.js";
@@ -36,6 +36,120 @@ loadLocalEnv();
 
 const app = express();
 const PORT = Number(process.env.PORT || 3460);
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "administrator";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
+const ADMIN_SESSION_SECRET = process.env.ADMIN_SESSION_SECRET || "";
+const AUTH_ENABLED = Boolean(ADMIN_PASSWORD && ADMIN_SESSION_SECRET);
+const SESSION_COOKIE = "antardrishti_session";
+const SESSION_MAX_AGE_SECONDS = 12 * 60 * 60;
+const LOGIN_ATTEMPTS = new Map();
+
+if (process.env.NODE_ENV === "production") {
+  if (!AUTH_ENABLED) throw new Error("Production launch blocked: set ADMIN_PASSWORD and ADMIN_SESSION_SECRET before starting Antardrishti.");
+  if (ADMIN_PASSWORD.length < 12) throw new Error("Production launch blocked: ADMIN_PASSWORD must contain at least 12 characters.");
+  if (ADMIN_SESSION_SECRET.length < 32) throw new Error("Production launch blocked: ADMIN_SESSION_SECRET must contain at least 32 characters.");
+}
+
+function safeTextEqual(left, right) {
+  const first = Buffer.from(String(left || ""));
+  const second = Buffer.from(String(right || ""));
+  return first.length === second.length && timingSafeEqual(first, second);
+}
+
+function sessionSignature(payload) {
+  return createHmac("sha256", ADMIN_SESSION_SECRET).update(payload).digest("base64url");
+}
+
+function createSessionToken(username) {
+  const payload = Buffer.from(JSON.stringify({
+    sub: username,
+    exp: Date.now() + SESSION_MAX_AGE_SECONDS * 1000
+  })).toString("base64url");
+  return payload + "." + sessionSignature(payload);
+}
+
+function getCookie(req, name) {
+  const header = String(req.headers.cookie || "");
+  for (const item of header.split(";")) {
+    const separator = item.indexOf("=");
+    if (separator < 0) continue;
+    if (item.slice(0, separator).trim() === name) return decodeURIComponent(item.slice(separator + 1).trim());
+  }
+  return "";
+}
+
+function isAuthenticated(req) {
+  if (!AUTH_ENABLED) return true;
+  const token = getCookie(req, SESSION_COOKIE);
+  const separator = token.lastIndexOf(".");
+  if (separator <= 0) return false;
+  const payload = token.slice(0, separator);
+  const suppliedSignature = token.slice(separator + 1);
+  const expectedSignature = sessionSignature(payload);
+  if (!safeTextEqual(suppliedSignature, expectedSignature)) return false;
+  try {
+    const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return session.sub === ADMIN_USERNAME && Number(session.exp) > Date.now();
+  } catch {
+    return false;
+  }
+}
+
+function authCookie(token, maxAge = SESSION_MAX_AGE_SECONDS) {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  return SESSION_COOKIE + "=" + encodeURIComponent(token) +
+    "; HttpOnly; SameSite=Strict; Path=/; Max-Age=" + maxAge + secure;
+}
+
+const loginPublicPaths = new Set([
+  "/api/auth/login", "/api/auth/logout", "/api/auth/me", "/api/health",
+  "/login.html", "/manifest.webmanifest", "/service-worker.js", "/antardrishti-mark.svg"
+]);
+
+app.use(express.json({ limit: "3mb" }));
+
+app.post("/api/auth/login", (req, res) => {
+  if (!AUTH_ENABLED) return res.json({ ok: true, authEnabled: false });
+  const remoteKey = String(req.ip || "unknown");
+  const attempt = LOGIN_ATTEMPTS.get(remoteKey) || { count: 0, firstAt: Date.now(), lockedUntil: 0 };
+  if (attempt.lockedUntil > Date.now()) {
+    return res.status(429).json({ error: "बहुत बार गलत प्रयास हुए हैं। 15 मिनट बाद फिर कोशिश करें।" });
+  }
+  const username = String(req.body?.username || "");
+  const password = String(req.body?.password || "");
+  const valid = safeTextEqual(username, ADMIN_USERNAME) && safeTextEqual(password, ADMIN_PASSWORD);
+  if (!valid) {
+    if (Date.now() - attempt.firstAt > 15 * 60 * 1000) {
+      attempt.count = 0;
+      attempt.firstAt = Date.now();
+    }
+    attempt.count += 1;
+    if (attempt.count >= 8) attempt.lockedUntil = Date.now() + 15 * 60 * 1000;
+    LOGIN_ATTEMPTS.set(remoteKey, attempt);
+    return res.status(401).json({ error: "Username या password सही नहीं है।" });
+  }
+  LOGIN_ATTEMPTS.delete(remoteKey);
+  res.setHeader("Set-Cookie", authCookie(createSessionToken(ADMIN_USERNAME)));
+  res.json({ ok: true, authEnabled: true });
+});
+
+app.post("/api/auth/logout", (_req, res) => {
+  res.setHeader("Set-Cookie", authCookie("", 0));
+  res.json({ ok: true });
+});
+
+app.get("/api/auth/me", (req, res) => {
+  res.json({ ok: true, authEnabled: AUTH_ENABLED, authenticated: isAuthenticated(req) });
+});
+
+app.use((req, res, next) => {
+  if (!AUTH_ENABLED || loginPublicPaths.has(req.path) || isAuthenticated(req)) return next();
+  if (req.path.startsWith("/api/")) {
+    return res.status(401).json({ error: "Login required. Sign in to Antardrishti Studio." });
+  }
+  return res.redirect("/login.html");
+});
+
 const DATA_DIR = path.join(__dirname, "..", "data");
 const OUTPUT_DIR = path.join(__dirname, "..", "outputs");
 const JOBS_FILE = path.join(DATA_DIR, "jobs.json");
@@ -62,7 +176,6 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 if (!fs.existsSync(JOBS_FILE)) fs.writeFileSync(JOBS_FILE, "[]", "utf8");
 
-app.use(express.json({ limit: "3mb" }));
 app.use(express.static(path.join(__dirname, "..", "public")));
 app.use("/outputs", express.static(OUTPUT_DIR));
 
