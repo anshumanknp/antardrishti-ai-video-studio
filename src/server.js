@@ -71,6 +71,9 @@ function writeJobs(jobs) { return writeJobStore(JOBS_FILE, jobs); }
 function removeSavedRenderedVideo(job) {
   if (!job?.renderedVideoFile) return;
   fs.rmSync(path.join(OUTPUT_DIR, path.basename(job.renderedVideoFile)), { force: true });
+  if (job?.renderedSubtitleFile) {
+    fs.rmSync(path.join(OUTPUT_DIR, path.basename(job.renderedSubtitleFile)), { force: true });
+  }
 }
 
 const renderQueue = createRenderQueue({
