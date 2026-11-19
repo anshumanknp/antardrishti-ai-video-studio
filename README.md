@@ -104,7 +104,8 @@ Each field can be edited and copied independently. Script regeneration or Devana
 6. Review the final video and all three platform-copy fields. In the main dashboard, change the job status to **Approved** only after that review.
 7. In Script Studio, select **Connect / Refresh Buffer**. The first Facebook, Instagram and YouTube channel (if connected) is selected by default. Adjust the checkboxes if needed.
 8. Generate the Social Media Content Pack. It contains separate Facebook and Instagram captions, a YouTube Shorts title and SEO description, hashtags, and 8–12 YouTube SEO keyword suggestions. Review the copy and approve the final video in the dashboard.
-9. Select **Queue to Selected Channels**. The Studio uploads the rendered video to Cloudinary automatically the first time, saves its permanent HTTPS URL to the job, and creates a separate Buffer queue post for each selected channel. No manual video URL or repeated upload is needed.
+9. In the Buffer Publishing panel, choose an optional date/time for each selected channel. The time is interpreted in that Buffer channel's configured timezone. Leave a channel's date/time blank to use its next available Buffer queue slot.
+10. Select **Queue / Schedule Selected Channels**. The Studio uploads the rendered video to Cloudinary automatically the first time, saves its permanent HTTPS URL to the job, and creates a separate Buffer post for each selected channel. No manual video URL or repeated upload is needed.
 
 ### Publishing Centre and Buffer sync
 
@@ -114,7 +115,7 @@ Each new **Queue to Selected Channels** batch is saved locally before the Buffer
 
 The tracker sync reads up to 20 pages of 50 posts per organization, covering a two-year history window. Buffer keeps sent and failed posts for two years; older sent or failed posts may no longer be available from its API. If the page cap is reached, the tracker warns that the returned list is incomplete. Scheduled dates are displayed using the Buffer channel's configured timezone.
 
-The sync is read-only: it does not create, edit or delete Buffer posts. A local post ID that is not returned in the sync is labelled **Not found in sync**, not automatically treated as deleted; verify its Buffer ID and history window before retrying to avoid duplicates.
+The tracker sync does not create, edit or delete posts. The Publishing Calendar shows posts by scheduled date in each channel's timezone; selecting a day filters the records below. From a post row, only a post whose Buffer status is **Scheduled** can be rescheduled or cancelled. Rescheduling uses Buffer's custom schedule mode; cancellation deletes the scheduled post from Buffer after confirmation. Published, failed and unverified posts do not expose those actions. A local post ID that is not returned in the sync is labelled **Not found in sync**, not automatically treated as deleted; verify its Buffer ID and history window before retrying to avoid duplicates.
 
 ### One-time Cloudinary setup for automatic video hosting
 
