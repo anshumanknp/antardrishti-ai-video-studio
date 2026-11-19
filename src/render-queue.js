@@ -1,3 +1,5 @@
+import { resetBufferApprovalIfContentChanged } from "./publishing-guard.js";
+
 export function createRenderQueue(options = {}) {
   const readJobs = options.readJobs;
   const writeJobs = options.writeJobs;
@@ -36,6 +38,8 @@ export function createRenderQueue(options = {}) {
     }
     if (job.renderStatus === "queued" || job.renderStatus === "rendering") return job;
 
+    // Any new render must receive a fresh human review and a fresh hosted URL.
+    resetBufferApprovalIfContentChanged(job);
     job.renderStatus = "queued";
     job.renderProgress = 0;
     job.renderError = "";
