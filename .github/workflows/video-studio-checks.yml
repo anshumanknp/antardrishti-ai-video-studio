@@ -31,6 +31,16 @@ jobs:
             writeFileSync("/tmp/antardrishti-dashboard.js", scripts.at(-1)[1]);
           '
           node --check /tmp/antardrishti-dashboard.js
+      - name: Check Publishing Centre inline JavaScript syntax
+        run: |
+          node --input-type=module -e '
+            import { readFileSync, writeFileSync } from "node:fs";
+            const html = readFileSync("public/publishing.html", "utf8");
+            const scripts = [...html.matchAll(/<script>([\\s\\S]*?)<\\/script>/g)];
+            if (!scripts.length) throw new Error("Publishing Centre inline script not found");
+            writeFileSync("/tmp/antardrishti-publishing.js", scripts.at(-1)[1]);
+          '
+          node --check /tmp/antardrishti-publishing.js
       - name: Run job-store regression tests
         run: npm test
       - name: Verify package metadata
