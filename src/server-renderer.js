@@ -50,7 +50,7 @@ function formatSrtTime(seconds) {
 }
 
 function wrapText(value, maxCharacters, maxLines) {
-  const words = String(value || "").replace(/\\s+/g, " ").trim().split(" ").filter(Boolean);
+  const words = String(value || "").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
   const lines = [];
   let line = "";
   for (const word of words) {
@@ -63,7 +63,7 @@ function wrapText(value, maxCharacters, maxLines) {
     }
   }
   if (line) lines.push(line);
-  return lines.slice(0, maxLines).join("\\n");
+  return lines.slice(0, maxLines).join("\n");
 }
 
 export function buildServerRenderPlan(job, outputDir) {
@@ -159,11 +159,11 @@ function writeTextFile(filePath, value) {
 
 function createSubtitleFile(filePath, cues) {
   const body = cues.map((cue, index) =>
-    String(index + 1) + "\\n" +
-    formatSrtTime(cue.start) + " --> " + formatSrtTime(cue.end) + "\\n" +
-    cue.text.replace(/[\\r\\n]+/g, " ")
-  ).join("\\n\\n");
-  fs.writeFileSync(filePath, body + (body ? "\\n" : ""), { encoding: "utf8", mode: 0o600 });
+    String(index + 1) + "\n" +
+    formatSrtTime(cue.start) + " --> " + formatSrtTime(cue.end) + "\n" +
+    cue.text.replace(/[\r\n]+/g, " ")
+  ).join("\n\n");
+  fs.writeFileSync(filePath, body + (body ? "\n" : ""), { encoding: "utf8", mode: 0o600 });
 }
 
 function runFfmpeg(ffmpegPath, args, duration, onProgress) {
@@ -175,10 +175,10 @@ function runFfmpeg(ffmpegPath, args, duration, onProgress) {
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", chunk => {
       stdoutBuffer += chunk;
-      const lines = stdoutBuffer.split(/\\r?\\n/);
+      const lines = stdoutBuffer.split(/\r?\n/);
       stdoutBuffer = lines.pop() || "";
       for (const line of lines) {
-        const match = line.match(/^out_time_ms=(\\d+)$/);
+        const match = line.match(/^out_time_ms=(\d+)$/);
         if (match && duration > 0) {
           const seconds = Number(match[1]) / 1_000_000;
           const progress = Math.max(4, Math.min(96, Math.round((seconds / duration) * 92) + 4));
