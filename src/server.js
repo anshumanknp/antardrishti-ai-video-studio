@@ -8,7 +8,7 @@ import { getRecommendedSceneCount, preserveSceneProductionFields, validateScript
 import { buildCloudflareScenePrompt } from "./image-prompt.js";
 import { getAlternateShotType, getVideoVisualPlan, getVisualImageTargets } from "./visual-plan.js";
 import { classifyCloudflareImageError } from "./cloudflare-errors.js";
-import { buildBufferVideoPostInput, validatePublicVideoUrl } from "./buffer-api.js";
+import { buildBufferVideoPostInput, validatePublicVideoUrl, validateScheduledAt } from "./buffer-api.js";
 import { buildRenderedVideoFileName, getRenderedVideoExtension } from "./rendered-video.js";
 import { assertBufferPublishAllowed, recordBufferQueuePost, resetBufferApprovalIfContentChanged } from "./publishing-guard.js";
 
@@ -561,7 +561,8 @@ function buildPublishingTrackerSnapshot(jobs, bufferPosts, channels, syncInfo) {
     const bufferPost = attempt.postId ? postsById.get(String(attempt.postId)) : null;
     const channel = channelById.get(String(attempt.channelId));
     let verificationStatus = "submission_failed";
-    if (attempt.postId) verificationStatus = bufferPost ? "matched" : "not_found";
+    if (attempt.attemptStatus === "cancelled") verificationStatus = "cancelled";
+    else if (attempt.postId) verificationStatus = bufferPost ? "matched" : "not_found";
     else if (["pending", "processing"].includes(String(attempt.attemptStatus || attempt.status || ""))) {
       verificationStatus = "pending";
     }
@@ -614,6 +615,7 @@ function buildPublishingTrackerSnapshot(jobs, bufferPosts, channels, syncInfo) {
       submissionFailed: enrichedAttempts.filter(item => item.verificationStatus === "submission_failed").length,
       notFoundInBuffer: enrichedAttempts.filter(item => item.verificationStatus === "not_found").length,
       pendingVerification: enrichedAttempts.filter(item => item.verificationStatus === "pending").length,
+      cancelled: enrichedAttempts.filter(item => item.verificationStatus === "cancelled").length,
       ...statusCounts
     },
     attempts: enrichedAttempts,
@@ -668,6 +670,111 @@ app.get("/api/buffer/publishing-tracker", async (_req, res) => {
     return res.status(error.status || 502).json({
       error: error.message || "Buffer publishing records sync नहीं हो पाए।"
     });
+  }
+});
+
+async function fetchBufferPostById(postId) {
+  const query = `query PublishingTrackerPost($input: PostInput!) {
+    post(input: $input) { id status dueAt channelId channelService }
+  }`;
+  const data = await callBufferApi(query, { input: { id: postId } });
+  return data.post || null;
+}
+
+function updateLocalBufferPostRecords(postId, updater) {
+  const jobs = readJobs();
+  let changed = false;
+  for (const job of jobs) {
+    for (const batch of Array.isArray(job.bufferQueueBatches) ? job.bufferQueueBatches : []) {
+      for (const item of Array.isArray(batch.items) ? batch.items : []) {
+        if (String(item.postId || "") === String(postId)) {
+          updater(item);
+          changed = true;
+        }
+      }
+    }
+    for (const item of Array.isArray(job.bufferQueuedPosts) ? job.bufferQueuedPosts : []) {
+      if (String(item.postId || "") === String(postId)) {
+        updater(item);
+        changed = true;
+      }
+    }
+  }
+  if (changed) writeJobs(jobs);
+}
+
+app.post("/api/buffer/posts/:id/reschedule", async (req, res) => {
+  if (!BUFFER_API_KEY) return res.status(503).json({ error: "BUFFER_API_KEY local .env में configure नहीं है।" });
+  const postId = String(req.params.id || "").trim();
+  if (!postId) return res.status(400).json({ error: "Buffer Post ID जरूरी है।" });
+  let dueAt;
+  try {
+    dueAt = validateScheduledAt(req.body?.dueAt);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+  if (!dueAt) return res.status(400).json({ error: "नई publishing date और time चुनें।" });
+
+  try {
+    const existing = await fetchBufferPostById(postId);
+    if (!existing) return res.status(404).json({ error: "यह post Buffer में नहीं मिली। पहले Sync with Buffer करें।" });
+    if (String(existing.status || "").toLowerCase() !== "scheduled") {
+      return res.status(409).json({ error: "केवल Scheduled post को reschedule किया जा सकता है। Published या failed post को यहाँ से नहीं बदलेंगे।" });
+    }
+    const mutation = `mutation ReschedulePost($input: EditPostInput!) {
+      editPost(input: $input) {
+        ... on PostActionSuccess { post { id status dueAt channelId } }
+        ... on MutationError { message }
+      }
+    }`;
+    const result = await callBufferApi(mutation, { input: { id: postId, mode: "customScheduled", dueAt } });
+    const action = result.editPost;
+    if (action?.message || !action?.post?.id) {
+      throw new Error(action?.message || "Buffer ने updated post details वापस नहीं किए।");
+    }
+    updateLocalBufferPostRecords(postId, item => {
+      item.dueAt = action.post.dueAt || dueAt;
+      item.rescheduledAt = new Date().toISOString();
+      item.scheduleMode = "custom";
+    });
+    return res.json({ ok: true, post: action.post });
+  } catch (error) {
+    console.error("[buffer-reschedule] " + (error.message || "Unknown reschedule error"));
+    return res.status(error.status || 502).json({ error: error.message || "Buffer post reschedule नहीं हो पाई।" });
+  }
+});
+
+app.delete("/api/buffer/posts/:id", async (req, res) => {
+  if (!BUFFER_API_KEY) return res.status(503).json({ error: "BUFFER_API_KEY local .env में configure नहीं है।" });
+  const postId = String(req.params.id || "").trim();
+  if (!postId) return res.status(400).json({ error: "Buffer Post ID जरूरी है।" });
+
+  try {
+    const existing = await fetchBufferPostById(postId);
+    if (!existing) return res.status(404).json({ error: "यह post Buffer में नहीं मिली। पहले Sync with Buffer करें।" });
+    if (String(existing.status || "").toLowerCase() !== "scheduled") {
+      return res.status(409).json({ error: "सिर्फ Scheduled और अभी publish न हुई post cancel की जा सकती है।" });
+    }
+    const mutation = `mutation CancelScheduledPost($input: DeletePostInput!) {
+      deletePost(input: $input) {
+        ... on DeletePostSuccess { id }
+        ... on VoidMutationError { message }
+      }
+    }`;
+    const result = await callBufferApi(mutation, { input: { id: postId } });
+    const action = result.deletePost;
+    if (action?.message || !action?.id) {
+      throw new Error(action?.message || "Buffer ने cancellation confirm नहीं की।");
+    }
+    updateLocalBufferPostRecords(postId, item => {
+      item.attemptStatus = "cancelled";
+      item.cancelledAt = new Date().toISOString();
+      item.error = "Cancelled in Buffer";
+    });
+    return res.json({ ok: true, id: action.id });
+  } catch (error) {
+    console.error("[buffer-cancel] " + (error.message || "Unknown cancel error"));
+    return res.status(error.status || 502).json({ error: error.message || "Buffer post cancel नहीं हो पाई।" });
   }
 });
 
@@ -894,6 +1001,20 @@ app.post("/api/jobs/:id/buffer/queue-all", async (req, res) => {
     : [];
   if (!channelIds.length) return res.status(400).json({ error: "कम-से-कम एक Buffer channel चुनें।" });
 
+  const rawChannelSchedules = req.body?.channelSchedules ?? {};
+  if (!rawChannelSchedules || typeof rawChannelSchedules !== "object" || Array.isArray(rawChannelSchedules)) {
+    return res.status(400).json({ error: "Per-channel schedule details सही format में नहीं हैं।" });
+  }
+  const channelSchedules = {};
+  try {
+    for (const channelId of channelIds) {
+      const requested = rawChannelSchedules[channelId];
+      channelSchedules[channelId] = requested ? validateScheduledAt(requested) : null;
+    }
+  } catch (error) {
+    return res.status(400).json({ error: error.message || "एक या अधिक publishing times सही नहीं हैं।" });
+  }
+
   let videoUrl;
   try {
     videoUrl = validatePublicVideoUrl(req.body?.videoUrl || job.bufferVideoUrl);
@@ -920,6 +1041,8 @@ app.post("/api/jobs/:id/buffer/queue-all", async (req, res) => {
       channelName: "",
       platform: "",
       attemptStatus: "pending",
+      scheduleMode: channelSchedules[channelId] ? "custom" : "queue",
+      requestedDueAt: channelSchedules[channelId] || null,
       postId: null,
       dueAt: null,
       bufferStatus: null,
@@ -983,11 +1106,13 @@ app.post("/api/jobs/:id/buffer/queue-all", async (req, res) => {
           channelId: channel.id,
           videoUrl
         });
+        const scheduledAt = channelSchedules[channel.id] || null;
         const input = buildBufferVideoPostInput({
           channel,
           videoUrl,
           platformCopy,
-          isAiGenerated: req.body?.isAiGenerated !== false
+          isAiGenerated: req.body?.isAiGenerated !== false,
+          scheduledAt
         });
         const result = await callBufferApi(mutation, { input });
         const action = result.createPost;
@@ -1002,9 +1127,12 @@ app.post("/api/jobs/:id/buffer/queue-all", async (req, res) => {
           dueAt: action.post.dueAt || null
         });
         savedPost.batchId = queueBatch.batchId;
+        savedPost.scheduleMode = scheduledAt ? "custom" : "queue";
         const attempt = queueBatch.items.find(item => item.channelId === channel.id);
         Object.assign(attempt || {}, {
           attemptStatus: "submitted",
+          scheduleMode: scheduledAt ? "custom" : "queue",
+          requestedDueAt: scheduledAt,
           postId: action.post.id,
           dueAt: action.post.dueAt || null,
           bufferStatus: action.post.status || "scheduled",
@@ -1020,7 +1148,9 @@ app.post("/api/jobs/:id/buffer/queue-all", async (req, res) => {
             channelId: channel.id,
             channelName: channel.name,
             platform: channel.service,
-            dueAt: action.post.dueAt || null
+            dueAt: action.post.dueAt || null,
+            scheduleMode: scheduledAt ? "custom" : "queue",
+            requestedDueAt: scheduledAt
           },
           failure: null
         };
