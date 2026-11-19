@@ -86,7 +86,6 @@ function chooseFont() {
     process.env.ANTARDRISHTI_FONT_PATH,
     "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
     "/usr/share/fonts/opentype/noto/NotoSansDevanagari-Regular.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
   ].filter(Boolean);
   return candidates.find(candidate => fs.existsSync(candidate)) || "";
 }
