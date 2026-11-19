@@ -1380,6 +1380,10 @@ app.post("/api/jobs/:id/host-video", async (req, res) => {
   const { jobs, job } = findJob(req.params.id);
   if (!job) return res.status(404).json({ error: "Video brief not found." });
   if (!job.renderedVideoFile) return res.status(400).json({ error: "पहले server पर final video render करें।" });
+  if (job.status !== "approved") {
+    return res.status(403).json({ error: "Cloudinary upload से पहले final video review करके dashboard में Approved करें।" });
+  }
+  if (job.bufferVideoUrl) return res.json({ ok: true, videoUrl: job.bufferVideoUrl, job, alreadyUploaded: true });
   if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
     return res.status(503).json({ error: "Cloudinary configure नहीं है। Server environment में CLOUDINARY_CLOUD_NAME और CLOUDINARY_UPLOAD_PRESET सेट करें।" });
   }
