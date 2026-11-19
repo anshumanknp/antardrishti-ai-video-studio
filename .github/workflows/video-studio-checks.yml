@@ -17,10 +17,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+      - name: Check FFmpeg render-test availability
+        run: |
+          if command -v ffmpeg >/dev/null 2>&1; then ffmpeg -version | head -n 1; ffmpeg -filters | grep -E "ass|subtitles" || true; else echo "FFmpeg unavailable; render integration test will be skipped."; fi
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Check server JavaScript syntax
         run: node --check src/server.js
+      - name: Check cloud renderer and queue JavaScript syntax
+        run: |
+          node --check src/cloud-renderer.js
+          node --check src/render-queue.js
+          bash -n scripts/oracle-bootstrap.sh
       - name: Check dashboard inline JavaScript syntax
         run: |
           node --input-type=module -e '

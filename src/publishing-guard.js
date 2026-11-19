@@ -23,6 +23,8 @@ export function resetBufferApprovalIfContentChanged(job, { invalidateRenderedVid
     delete job.renderedVideoMimeType;
     delete job.renderedVideoSizeBytes;
     delete job.renderedVideoSavedAt;
+    delete job.renderedSubtitleFile;
+    delete job.renderDurationSec;
     changed = true;
   }
   return changed;

@@ -11,6 +11,14 @@ import { classifyCloudflareImageError } from "./cloudflare-errors.js";
 import { buildBufferVideoPostInput, validatePublicVideoUrl, validateScheduledAt } from "./buffer-api.js";
 import { buildRenderedVideoFileName, getRenderedVideoExtension } from "./rendered-video.js";
 import { assertBufferPublishAllowed, recordBufferQueuePost, resetBufferApprovalIfContentChanged } from "./publishing-guard.js";
+import { renderJobWithFfmpeg } from "./cloud-renderer.js";
+import { createRenderQueue } from "./render-queue.js";
+import {
+  createAdminSessionToken,
+  isValidAdminPasswordHash,
+  verifyAdminPassword,
+  verifyAdminSessionToken
+} from "./admin-auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -34,8 +42,8 @@ loadLocalEnv();
 
 const app = express();
 const PORT = Number(process.env.PORT || 3460);
-const DATA_DIR = path.join(__dirname, "..", "data");
-const OUTPUT_DIR = path.join(__dirname, "..", "outputs");
+const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, "..", "data"));
+const OUTPUT_DIR = path.resolve(process.env.OUTPUT_DIR || path.join(__dirname, "..", "outputs"));
 const JOBS_FILE = path.join(DATA_DIR, "jobs.json");
 const BRAND_LOGO_META_FILE = path.join(DATA_DIR, "brand-logo.json");
 const GEMINI_TEXT_MODEL = "gemini-3.8-flash";
@@ -56,12 +64,134 @@ const MALE_TTS_VOICES = new Set(["Orus", "Puck", "Charon", "Algieba", "Sadaltage
 const DEFAULT_FEMALE_VOICE = "Kore";
 const DEFAULT_MALE_VOICE = "Orus";
 
+const ADMIN_AUTH_ENABLED = process.env.ADMIN_AUTH_ENABLED === "true";
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "";
+const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH || "";
+const ADMIN_SESSION_SECRET = process.env.ADMIN_SESSION_SECRET || "";
+const ADMIN_SESSION_COOKIE = "antardrishti_admin_session";
+const ADMIN_SESSION_MAX_AGE_SECONDS = 12 * 60 * 60;
+const ADMIN_COOKIE_SECURE = process.env.ADMIN_COOKIE_SECURE === "true" || process.env.NODE_ENV === "production";
+if (ADMIN_AUTH_ENABLED && (
+  !ADMIN_USERNAME ||
+  !isValidAdminPasswordHash(ADMIN_PASSWORD_HASH) ||
+  ADMIN_SESSION_SECRET.length < 32
+)) {
+  throw new Error("Admin authentication enabled है, लेकिन ADMIN_USERNAME, valid ADMIN_PASSWORD_HASH या कम-से-कम 32 characters का ADMIN_SESSION_SECRET missing/invalid है।");
+}
+
+function getAdminSessionToken(req) {
+  const prefix = ADMIN_SESSION_COOKIE + "=";
+  const entry = String(req.headers.cookie || "").split(";").map(value => value.trim()).find(value => value.startsWith(prefix));
+  if (!entry) return "";
+  try { return decodeURIComponent(entry.slice(prefix.length)); }
+  catch { return ""; }
+}
+
+function hasAdminSession(req) {
+  if (!ADMIN_AUTH_ENABLED) return true;
+  return verifyAdminSessionToken(getAdminSessionToken(req), ADMIN_SESSION_SECRET);
+}
+
+function setAdminSessionCookie(res, token) {
+  const attributes = [
+    ADMIN_SESSION_COOKIE + "=" + encodeURIComponent(token),
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Strict",
+    "Max-Age=" + ADMIN_SESSION_MAX_AGE_SECONDS
+  ];
+  if (ADMIN_COOKIE_SECURE) attributes.push("Secure");
+  res.setHeader("Set-Cookie", attributes.join("; "));
+  res.setHeader("Cache-Control", "no-store");
+}
+
+function clearAdminSessionCookie(res) {
+  const attributes = [
+    ADMIN_SESSION_COOKIE + "=",
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Strict",
+    "Max-Age=0"
+  ];
+  if (ADMIN_COOKIE_SECURE) attributes.push("Secure");
+  res.setHeader("Set-Cookie", attributes.join("; "));
+  res.setHeader("Cache-Control", "no-store");
+}
+
+
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 if (!fs.existsSync(JOBS_FILE)) fs.writeFileSync(JOBS_FILE, "[]", "utf8");
 
 app.use(express.json({ limit: "3mb" }));
-app.use(express.static(path.join(__dirname, "..", "public")));
+
+app.get("/login.html", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.sendFile(path.join(__dirname, "..", "public", "login.html"));
+});
+
+app.get("/api/auth/status", (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json({
+    authEnabled: ADMIN_AUTH_ENABLED,
+    authenticated: hasAdminSession(req),
+    sessionExpiresInSeconds: hasAdminSession(req) && ADMIN_AUTH_ENABLED ? ADMIN_SESSION_MAX_AGE_SECONDS : null
+  });
+});
+
+const loginAttempts = new Map();
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_ATTEMPTS = 5;
+
+app.post("/api/auth/login", (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  if (!ADMIN_AUTH_ENABLED) return res.status(404).json({ error: "Admin login is not enabled on this server." });
+
+  const clientKey = req.ip || req.socket.remoteAddress || "unknown";
+  const now = Date.now();
+  const attempt = loginAttempts.get(clientKey);
+  if (attempt && now - attempt.windowStartedAt < LOGIN_WINDOW_MS && attempt.count >= LOGIN_MAX_ATTEMPTS) {
+    return res.status(429).json({ error: "बहुत बार गलत login हुआ है। 15 मिनट बाद फिर कोशिश करें।" });
+  }
+  if (attempt && now - attempt.windowStartedAt >= LOGIN_WINDOW_MS) loginAttempts.delete(clientKey);
+
+  const username = String(req.body?.username || "");
+  const password = String(req.body?.password || "");
+  const usernameMatches = username.length === ADMIN_USERNAME.length &&
+    Buffer.from(username).equals(Buffer.from(ADMIN_USERNAME));
+  const passwordMatches = verifyAdminPassword(password, ADMIN_PASSWORD_HASH);
+  if (!usernameMatches || !passwordMatches) {
+    const current = loginAttempts.get(clientKey);
+    if (!current || now - current.windowStartedAt >= LOGIN_WINDOW_MS) {
+      loginAttempts.set(clientKey, { windowStartedAt: now, count: 1 });
+    } else {
+      current.count++;
+    }
+    return res.status(401).json({ error: "Username या password सही नहीं है।" });
+  }
+
+  loginAttempts.delete(clientKey);
+  setAdminSessionCookie(res, createAdminSessionToken(ADMIN_SESSION_SECRET));
+  return res.json({ ok: true, authenticated: true });
+});
+
+app.post("/api/auth/logout", (_req, res) => {
+  clearAdminSessionCookie(res);
+  res.json({ ok: true });
+});
+
+app.use((req, res, next) => {
+  if (!ADMIN_AUTH_ENABLED) return next();
+  if (["/api/auth/status", "/api/auth/login", "/api/auth/logout"].includes(req.path)) return next();
+  if (hasAdminSession(req)) return next();
+  res.setHeader("Cache-Control", "no-store");
+  if (req.path.startsWith("/api/")) {
+    return res.status(401).json({ error: "AUTH_REQUIRED", authenticated: false });
+  }
+  return res.redirect(302, "/login.html");
+});
+
+app.use(express.static(path.join(__dirname, "..", "public"), { index: "index.html" }));
 app.use("/outputs", express.static(OUTPUT_DIR));
 
 function readJobs() { return readJobStore(JOBS_FILE); }
@@ -69,7 +199,22 @@ function writeJobs(jobs) { return writeJobStore(JOBS_FILE, jobs); }
 function removeSavedRenderedVideo(job) {
   if (!job?.renderedVideoFile) return;
   fs.rmSync(path.join(OUTPUT_DIR, path.basename(job.renderedVideoFile)), { force: true });
+  if (job?.renderedSubtitleFile) {
+    fs.rmSync(path.join(OUTPUT_DIR, path.basename(job.renderedSubtitleFile)), { force: true });
+  }
 }
+
+const renderQueue = createRenderQueue({
+  readJobs,
+  writeJobs,
+  maxConcurrent: Math.max(1, Math.min(2, Number(process.env.RENDER_CONCURRENCY || 1))),
+  renderJob: (job, options) => renderJobWithFfmpeg(job, {
+    ...options,
+    outputsDir: OUTPUT_DIR,
+    dataDir: DATA_DIR,
+    ffmpegPath: process.env.FFMPEG_PATH || "ffmpeg"
+  })
+});
 
 function pcmToWav(pcm, sampleRate = 24000, channels = 1, bitsPerSample = 16) {
   const header = Buffer.alloc(44);
@@ -1386,6 +1531,41 @@ app.put("/api/jobs/:id/rendered-video", express.raw({ type: "video/*", limit: "2
   }
 });
 
+app.post("/api/jobs/:id/render", (req, res) => {
+  const job = readJobs().find(item => item.id === req.params.id);
+  if (!job) return res.status(404).json({ error: "Video brief not found." });
+  if (!job.scriptData?.scenes?.length) {
+    return res.status(400).json({ error: "पहले Hindi script और scene plan तैयार करें।" });
+  }
+  if (!job.voiceFile) {
+    return res.status(400).json({ error: "पहले Hindi voice generate करें।" });
+  }
+  try {
+    const queuedJob = renderQueue.enqueue(job.id);
+    return res.status(202).json({
+      ok: true,
+      message: "Server render queue में जोड़ दिया गया। आप page बंद कर सकते हैं; render server पर जारी रहेगा।",
+      job: queuedJob
+    });
+  } catch (error) {
+    return res.status(400).json({ error: error.message || "Render queue में job नहीं जोड़ पाए।" });
+  }
+});
+
+app.get("/api/jobs/:id/render-status", (req, res) => {
+  const job = readJobs().find(item => item.id === req.params.id);
+  if (!job) return res.status(404).json({ error: "Video brief not found." });
+  res.json({
+    ok: true,
+    renderStatus: job.renderStatus || "not_started",
+    renderProgress: Number(job.renderProgress || 0),
+    renderError: job.renderError || "",
+    renderedVideoFile: job.renderedVideoFile || "",
+    renderedSubtitleFile: job.renderedSubtitleFile || "",
+    renderDurationSec: job.renderDurationSec || null
+  });
+});
+
 app.post("/api/jobs/:id/generate-script", async (req, res) => {
   const { jobs, job } = findJob(req.params.id);
   if (!job) return res.status(404).json({ error: "Video brief not found." });
@@ -1999,6 +2179,9 @@ app.delete("/api/jobs/:id", (req, res) => {
   const jobs = readJobs();
   const index = jobs.findIndex(item => item.id === req.params.id);
   if (index === -1) return res.status(404).json({ error: "Video brief not found." });
+  if (["queued", "rendering"].includes(jobs[index].renderStatus)) {
+    return res.status(409).json({ error: "Rendering के दौरान यह video brief delete नहीं हो सकती। Render पूरा होने के बाद फिर कोशिश करें।" });
+  }
   const [deletedJob] = jobs.splice(index, 1);
   writeJobs(jobs);
   try {
@@ -2092,6 +2275,8 @@ app.patch("/api/jobs/:id", (req, res) => {
   res.json(job);
 });
 
-app.listen(PORT, "0.0.0.0", () => {
+renderQueue.recover();
+
+app.listen(PORT, process.env.HOST || "0.0.0.0", () => {
   console.log("Antardrishti Studio running on port " + PORT + " (local network enabled)");
 });
