@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { readJobs as readJobStore, writeJobs as writeJobStore } from "./job-store.js";
 import { getRecommendedSceneCount, preserveSceneProductionFields, validateScriptData } from "./script-validation.js";
 import { buildCloudflareScenePrompt } from "./image-prompt.js";
@@ -10,6 +11,8 @@ import { getAlternateShotType, getVideoVisualPlan, getVisualImageTargets } from 
 import { classifyCloudflareImageError } from "./cloudflare-errors.js";
 import { buildBufferVideoPostInput, validatePublicVideoUrl, validateScheduledAt } from "./buffer-api.js";
 import { buildRenderedVideoFileName, getRenderedVideoExtension } from "./rendered-video.js";
+import { enqueueRenderTask, readRenderQueue, recoverInterruptedRenderTasks, claimNextRenderTask, updateRenderTask } from "./render-queue.js";
+import { renderServerVideo } from "./server-renderer.js";
 import { assertBufferPublishAllowed, recordBufferQueuePost, resetBufferApprovalIfContentChanged } from "./publishing-guard.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -37,6 +40,9 @@ const PORT = Number(process.env.PORT || 3460);
 const DATA_DIR = path.join(__dirname, "..", "data");
 const OUTPUT_DIR = path.join(__dirname, "..", "outputs");
 const JOBS_FILE = path.join(DATA_DIR, "jobs.json");
+const RENDER_QUEUE_FILE = path.join(DATA_DIR, "render-queue.json");
+const FFMPEG_PATH = process.env.FFMPEG_PATH || "ffmpeg";
+const ANTARDRISHTI_FONT_FILE = process.env.ANTARDRISHTI_FONT_FILE || "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf";
 const BRAND_LOGO_META_FILE = path.join(DATA_DIR, "brand-logo.json");
 const GEMINI_TEXT_MODEL = "gemini-3.8-flash";
 const GEMINI_TTS_MODEL = process.env.GEMINI_TTS_MODEL || "gemini-3.1-flash-tts-preview";
@@ -60,6 +66,24 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 if (!fs.existsSync(JOBS_FILE)) fs.writeFileSync(JOBS_FILE, "[]", "utf8");
 
+if (!fs.existsSync(RENDER_QUEUE_FILE)) fs.writeFileSync(RENDER_QUEUE_FILE, "[]", "utf8");
+const recoveredRenderTasks = recoverInterruptedRenderTasks(RENDER_QUEUE_FILE);
+if (recoveredRenderTasks) {
+  const recoveredJobs = readJobs();
+  let changed = false;
+  for (const task of readRenderQueue(RENDER_QUEUE_FILE).filter(item => item.status === "queued" && item.recoveredAt)) {
+    const job = recoveredJobs.find(item => item.id === task.jobId);
+    if (!job || job.renderTaskId !== task.id || job.renderStatus !== "processing") continue;
+    job.renderStatus = "queued";
+    job.renderProgress = 0;
+    job.renderStage = task.stage;
+    job.updatedAt = new Date().toISOString();
+    changed = true;
+  }
+  if (changed) writeJobs(recoveredJobs);
+}
+
+
 app.use(express.json({ limit: "3mb" }));
 app.use(express.static(path.join(__dirname, "..", "public")));
 app.use("/outputs", express.static(OUTPUT_DIR));
@@ -69,6 +93,7 @@ function writeJobs(jobs) { return writeJobStore(JOBS_FILE, jobs); }
 function removeSavedRenderedVideo(job) {
   if (!job?.renderedVideoFile) return;
   fs.rmSync(path.join(OUTPUT_DIR, path.basename(job.renderedVideoFile)), { force: true });
+  if (job.renderedSubtitleFile) fs.rmSync(path.join(OUTPUT_DIR, path.basename(job.renderedSubtitleFile)), { force: true });
 }
 
 function pcmToWav(pcm, sampleRate = 24000, channels = 1, bitsPerSample = 16) {
@@ -366,6 +391,137 @@ function findJob(id) {
   }
   return { jobs, job };
 }
+
+function isServerRenderingAvailable() {
+  const probe = spawnSync(FFMPEG_PATH, ["-version"], { stdio: "ignore", timeout: 5000 });
+  return !probe.error && probe.status === 0 && fs.existsSync(ANTARDRISHTI_FONT_FILE);
+}
+
+function getBrandLogoPath() {
+  try {
+    const logo = JSON.parse(fs.readFileSync(BRAND_LOGO_META_FILE, "utf8"));
+    const fileName = path.basename(String(logo?.fileName || ""));
+    if (!fileName || fileName !== logo.fileName) return null;
+    const filePath = path.join(OUTPUT_DIR, fileName);
+    return fs.existsSync(filePath) ? filePath : null;
+  } catch {
+    return null;
+  }
+}
+
+function renderSourceSignature(job) {
+  return JSON.stringify({
+    id: job.id,
+    duration: job.duration,
+    script: job.script,
+    scriptData: job.scriptData,
+    sceneImages: job.sceneImages,
+    voiceFile: job.voiceFile
+  });
+}
+
+let renderWorkerBusy = false;
+
+async function processNextRenderTask() {
+  if (renderWorkerBusy || !isServerRenderingAvailable()) return;
+  const task = claimNextRenderTask(RENDER_QUEUE_FILE);
+  if (!task) return;
+  renderWorkerBusy = true;
+
+  try {
+    const { job } = findJob(task.jobId);
+    if (!job) {
+      updateRenderTask(RENDER_QUEUE_FILE, task.id, {
+        status: "failed",
+        stage: "Video job no longer exists",
+        error: "इस video job को delete कर दिया गया है।",
+        completedAt: new Date().toISOString()
+      });
+      return;
+    }
+
+    const sourceSignature = renderSourceSignature(job);
+    const jobsAtStart = readJobs();
+    const currentAtStart = jobsAtStart.find(item => item.id === task.jobId);
+    if (currentAtStart) {
+      currentAtStart.renderStatus = "processing";
+      currentAtStart.renderProgress = 1;
+      currentAtStart.renderStage = "Preparing video assets";
+      currentAtStart.renderError = "";
+      currentAtStart.renderTaskId = task.id;
+      currentAtStart.updatedAt = new Date().toISOString();
+      writeJobs(jobsAtStart);
+    }
+
+    const result = await renderServerVideo({
+      job,
+      outputDir: OUTPUT_DIR,
+      brandLogoPath: getBrandLogoPath(),
+      ffmpegPath: FFMPEG_PATH,
+      fontFile: ANTARDRISHTI_FONT_FILE,
+      onProgress: (progress, stage) => {
+        updateRenderTask(RENDER_QUEUE_FILE, task.id, { progress, stage });
+        const progressJobs = readJobs();
+        const progressJob = progressJobs.find(item => item.id === task.jobId);
+        if (progressJob) {
+          progressJob.renderStatus = "processing";
+          progressJob.renderProgress = progress;
+          progressJob.renderStage = stage || "Rendering MP4 on Oracle Cloud";
+          progressJob.updatedAt = new Date().toISOString();
+          writeJobs(progressJobs);
+        }
+      }
+    });
+
+    const latestJobs = readJobs();
+    const latestJob = latestJobs.find(item => item.id === task.jobId);
+    if (!latestJob || renderSourceSignature(latestJob) !== sourceSignature) {
+      fs.rmSync(path.join(OUTPUT_DIR, result.videoFile), { force: true });
+      fs.rmSync(path.join(OUTPUT_DIR, result.subtitleFile), { force: true });
+      throw new Error("Render के दौरान script, voice या scene images बदल गईं। नई content के साथ दोबारा render करें।");
+    }
+
+    latestJob.renderedVideoFile = result.videoFile;
+    latestJob.renderedVideoMimeType = result.mimeType;
+    latestJob.renderedVideoSizeBytes = result.sizeBytes;
+    latestJob.renderedVideoSavedAt = new Date().toISOString();
+    latestJob.renderedSubtitleFile = result.subtitleFile;
+    latestJob.renderStatus = "completed";
+    latestJob.renderProgress = 100;
+    latestJob.renderStage = "Video ready";
+    latestJob.renderError = "";
+    latestJob.updatedAt = new Date().toISOString();
+    writeJobs(latestJobs);
+
+    updateRenderTask(RENDER_QUEUE_FILE, task.id, {
+      status: "completed",
+      stage: "Video ready",
+      progress: 100,
+      outputFile: result.videoFile,
+      completedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    const failureJobs = readJobs();
+    const failureJob = failureJobs.find(item => item.id === task.jobId);
+    if (failureJob) {
+      failureJob.renderStatus = "failed";
+      failureJob.renderError = String(error?.message || "Server rendering failed.").slice(0, 1000);
+      failureJob.renderStage = "Render failed";
+      failureJob.updatedAt = new Date().toISOString();
+      writeJobs(failureJobs);
+    }
+    updateRenderTask(RENDER_QUEUE_FILE, task.id, {
+      status: "failed",
+      stage: "Render failed",
+      error: String(error?.message || "Server rendering failed.").slice(0, 1000),
+      completedAt: new Date().toISOString()
+    });
+    console.error("[server-render] " + (error?.message || "Unknown rendering error"));
+  } finally {
+    renderWorkerBusy = false;
+  }
+}
+
 
 app.get("/api/health", (_req, res) => {
   const imageUsageToday = readImageUsage().count;
@@ -1303,6 +1459,50 @@ app.delete("/api/brand/logo", (_req, res) => {
   res.json({ ok: true });
 });
 
+
+app.get("/api/rendering/mode", (_req, res) => {
+  const serverSideAvailable = isServerRenderingAvailable();
+  res.json({
+    serverSideAvailable,
+    engine: serverSideAvailable ? "ffmpeg" : "browser",
+    message: serverSideAvailable
+      ? "Server-side FFmpeg rendering is ready."
+      : "Server FFmpeg या Hindi font उपलब्ध नहीं है; इस machine पर browser rendering इस्तेमाल होगी."
+  });
+});
+
+app.post("/api/jobs/:id/render", (req, res) => {
+  if (!isServerRenderingAvailable()) {
+    return res.status(503).json({ error: "Server-side rendering अभी उपलब्ध नहीं है। Oracle पर FFmpeg और Noto Sans Devanagari install करें।" });
+  }
+  const { jobs, job } = findJob(req.params.id);
+  if (!job) return res.status(404).json({ error: "Video brief not found." });
+  if (!job.scriptData?.scenes?.length) {
+    return res.status(400).json({ error: "पहले Hindi script और scene plan तैयार करें।" });
+  }
+  try {
+    const queued = enqueueRenderTask(RENDER_QUEUE_FILE, job.id);
+    job.renderStatus = queued.task.status;
+    job.renderTaskId = queued.task.id;
+    job.renderProgress = queued.task.progress;
+    job.renderStage = queued.task.stage;
+    job.renderError = "";
+    job.updatedAt = new Date().toISOString();
+    writeJobs(jobs);
+    res.status(202).json({ ok: true, created: queued.created, task: queued.task, job });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Render queue में video add नहीं हो पाई।" });
+  }
+});
+
+app.get("/api/jobs/:id/render-status", (req, res) => {
+  const { job } = findJob(req.params.id);
+  if (!job) return res.status(404).json({ error: "Video brief not found." });
+  const tasks = readRenderQueue(RENDER_QUEUE_FILE).filter(task => task.jobId === job.id);
+  const task = tasks.at(-1) || null;
+  res.json({ ok: true, task, job });
+});
+
 app.get("/api/jobs", (_req, res) => {
   const jobs = readJobs().map(job => ({
     ...job,
@@ -2091,6 +2291,11 @@ app.patch("/api/jobs/:id", (req, res) => {
   writeJobs(jobs);
   res.json(job);
 });
+
+const renderWorkerInterval = setInterval(() => {
+  processNextRenderTask().catch(error => console.error("[server-render-worker] " + (error?.message || "Unknown error")));
+}, 2000);
+renderWorkerInterval.unref?.();
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log("Antardrishti Studio running on port " + PORT + " (local network enabled)");
