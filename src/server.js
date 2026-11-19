@@ -688,9 +688,12 @@ app.post("/api/jobs/:id/buffer/queue-all", async (req, res) => {
     return res.status(409).json({ error: "तीनों platforms की saved social copy और YouTube SEO pack पहले generate करके review करें।" });
   }
 
+  const queueStartedAt = Date.now();
+  console.info("[buffer-queue-all] started job=" + job.id + " selectedChannels=" + channelIds.length);
   try {
     const bufferData = await fetchBufferOrganizationsAndChannels();
     const availableChannels = bufferData.organizations.flatMap(organization => organization.channels);
+    console.info("[buffer-queue-all] Buffer channel lookup completed in " + (Date.now() - queueStartedAt) + "ms; availableChannels=" + availableChannels.length);
     const selectedChannels = [];
     const failures = [];
     for (const channelId of channelIds) {
@@ -709,8 +712,9 @@ app.post("/api/jobs/:id/buffer/queue-all", async (req, res) => {
         ... on MutationError { message }
       }
     }`;
-    const results = [];
-    for (const channel of selectedChannels) {
+    const queueOutcomes = await Promise.all(selectedChannels.map(async channel => {
+      const platform = String(channel.service || "channel").toLowerCase();
+      console.info("[buffer-queue] started " + platform + " · " + channel.name);
       try {
         const videoFingerprint = assertBufferPublishAllowed(job, {
           channelId: channel.id,
@@ -734,24 +738,33 @@ app.post("/api/jobs/:id/buffer/queue-all", async (req, res) => {
           platform: channel.service,
           dueAt: action.post.dueAt || null
         });
-        results.push({
-          queued: true,
-          postId: action.post.id,
-          channelId: channel.id,
-          channelName: channel.name,
-          platform: channel.service,
-          dueAt: action.post.dueAt || null
-        });
+        console.info("[buffer-queue] queued " + platform + " · " + channel.name + " · " + action.post.id);
+        return {
+          result: {
+            queued: true,
+            postId: action.post.id,
+            channelId: channel.id,
+            channelName: channel.name,
+            platform: channel.service,
+            dueAt: action.post.dueAt || null
+          },
+          failure: null
+        };
       } catch (error) {
-        console.error("[buffer-queue] " + String(channel.service || "channel") + ": " + (error.message || "Queue failed"));
-        failures.push({
-          channelId: channel.id,
-          channelName: channel.name,
-          platform: channel.service,
-          error: error.message || "इस channel पर post queue नहीं हो पाई।"
-        });
+        console.error("[buffer-queue] failed " + platform + " · " + channel.name + ": " + (error.message || "Queue failed"));
+        return {
+          result: null,
+          failure: {
+            channelId: channel.id,
+            channelName: channel.name,
+            platform: channel.service,
+            error: error.message || "इस channel पर post queue नहीं हो पाई।"
+          }
+        };
       }
-    }
+    }));
+    const results = queueOutcomes.map(item => item.result).filter(Boolean);
+    failures.push(...queueOutcomes.map(item => item.failure).filter(Boolean));
 
     if (results.length) {
       job.bufferVideoUrl = videoUrl;
@@ -759,6 +772,8 @@ app.post("/api/jobs/:id/buffer/queue-all", async (req, res) => {
       writeJobs(jobs);
     }
     const status = results.length === 0 ? 502 : failures.length ? 207 : 200;
+    console.info("[buffer-queue-all] completed in " + (Date.now() - queueStartedAt) +
+      "ms; queued=" + results.length + "; failed=" + failures.length);
     res.status(status).json({
       ok: results.length > 0 && failures.length === 0,
       queuedCount: results.length,
@@ -768,7 +783,8 @@ app.post("/api/jobs/:id/buffer/queue-all", async (req, res) => {
       job
     });
   } catch (error) {
-    console.error("[buffer-queue-all] " + (error.message || "Unknown queue error"));
+    console.error("[buffer-queue-all] failed after " + (Date.now() - queueStartedAt) +
+      "ms: " + (error.message || "Unknown queue error"));
     res.status(error.status || 502).json({
       error: error.message || "Buffer से channel list या queue request पूरी नहीं हो सकी।"
     });
