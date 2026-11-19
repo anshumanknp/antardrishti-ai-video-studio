@@ -3,7 +3,7 @@ const SUPPORTED_SERVICES = new Set(["facebook", "instagram", "youtube"]);
 export function validateScheduledAt(scheduledAt, now = Date.now()) {
   if (scheduledAt === undefined || scheduledAt === null || scheduledAt === "") return null;
   const value = String(scheduledAt).trim();
-  if (!value || !/[Tt]/.test(value) || !/(?:Z|[+-]\\d{2}:\\d{2})$/i.test(value)) {
+  if (!value || !/[Tt]/.test(value) || !/(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) {
     throw new Error("Choose a complete date and time with an explicit timezone.");
   }
   const timestamp = Date.parse(value);
