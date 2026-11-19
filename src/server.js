@@ -440,7 +440,7 @@ async function fetchBufferOrganizationsAndChannels() {
   const organizations = Array.isArray(account.organizations) ? account.organizations : [];
   const results = await Promise.all(organizations.map(async organization => {
     const query = "query BufferChannels { channels(input: { organizationId: " +
-      JSON.stringify(organization.id) + " }) { id name service } }";
+      JSON.stringify(organization.id) + " }) { id name service timezone isDisconnected isQueuePaused } }";
     const data = await callBufferApi(query);
     return {
       id: organization.id,
