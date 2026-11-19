@@ -505,7 +505,7 @@
           <button class="secondary-btn" id="convertScriptBtn" type="button">Convert to देवनागरी</button>
           <button class="secondary-btn" id="saveScriptBtn" type="button">Save Script Edits</button>
           <button class="secondary-btn" id="generateVoiceBtn" type="button">Generate Hindi Voice</button>
-          <button class="secondary-btn" id="renderVideoBtn" type="button">Create Slide Video</button>
+          <button class="secondary-btn" id="renderVideoBtn" type="button">Render on Cloud</button>
           <button class="primary-btn" id="autoCreateVideoBtn" type="button" disabled>Auto Create Video (Free APIs)</button>
         </div>
         <section class="social-pack" aria-labelledby="socialPackTitle">
@@ -602,7 +602,7 @@
         <p class="privacy-note">Free-tier AI requests are sent to Google. Do not include client names, private therapy notes or other sensitive personal information. Generated scripts need your review before publication.</p>
       </div>
     </dialog>
-    <p class="footer-note">यह dashboard video briefs और production status manage करता है। Script Studio में Hindi script, voice, scene images, subtitles और browser-based video rendering उपलब्ध हैं। Buffer Queue में post भेजने से पहले dashboard में status Approved होना जरूरी है।</p>
+    <p class="footer-note">यह dashboard video briefs और production status manage करता है। Script Studio में Hindi script, voice, scene images, subtitles और Oracle server-based video rendering उपलब्ध है। Buffer Queue में post भेजने से पहले dashboard में status Approved होना जरूरी है।</p>
   </main>
 </div>
 
@@ -1733,7 +1733,8 @@
       voicePlayer.removeAttribute("src");
       voicePlayer.load();
     }
-    document.getElementById("renderVideoBtn").disabled = !activeScriptData;
+    document.getElementById("renderVideoBtn").disabled = !activeScriptData || !job.voiceFile;
+    document.getElementById("renderVideoBtn").textContent = "Render on Cloud";
     document.getElementById("generateVoiceBtn").disabled = !activeScriptData;
     document.getElementById("autoCreateVideoBtn").disabled = !imageGenerationEnabled || !activeScriptData;
   }
@@ -1760,6 +1761,12 @@
     download.download = "antardrishti-" + job.id.slice(0, 8) + "." + currentVideoExtension;
     download.textContent = "Download " + currentVideoExtension.toUpperCase() + " video (" + Math.round(blob.size / 1024 / 1024 * 10) / 10 + " MB)";
     document.getElementById("videoResult").style.display = "block";
+    if (job.renderedSubtitleFile) {
+      const subtitleDownload = document.getElementById("subtitleDownload");
+      subtitleDownload.href = "/outputs/" + encodeURIComponent(job.renderedSubtitleFile);
+      subtitleDownload.download = job.renderedSubtitleFile;
+      subtitleDownload.textContent = "Download Hindi subtitles (.srt)";
+    }
     refreshBufferPublishControls();
     return true;
   }
@@ -1789,7 +1796,10 @@
       }
     }
     if (!activeJob.scriptData) await generateScript(true);
-    else if (!activeJob.renderedVideoFile) setStudioStatus("Script तैयार है। Edit करें या अगला step चुनें।");
+    else if (["queued", "rendering"].includes(activeJob.renderStatus)) {
+      setStudioStatus("Oracle server पर video rendering जारी है। आप page बंद कर सकते हैं।");
+      monitorCloudRender(jobId).catch(error => setStudioStatus(error.message || "Cloud render status नहीं मिल पाया।", true));
+    } else if (!activeJob.renderedVideoFile) setStudioStatus("Script तैयार है। Voice generate करने के बाद Render on Cloud दबाएँ।");
   }
 
   async function generateScript(opening = false) {
@@ -2024,438 +2034,89 @@
     return entries.join("\n\n") + "\n";
   }
 
+  async function monitorCloudRender(jobId) {
+    const button = document.getElementById("renderVideoBtn");
+    let status = null;
+    while (true) {
+      const response = await fetch("/api/jobs/" + encodeURIComponent(jobId) + "/render-status", { cache: "no-store" });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "Render status नहीं मिल पाया।");
+      status = result;
+      if (activeJobId === jobId) {
+        if (status.renderStatus === "queued" || status.renderStatus === "rendering") {
+          button.disabled = true;
+          button.textContent = "Cloud render " + Number(status.renderProgress || 0) + "%";
+          setStudioStatus(
+            (status.renderStatus === "queued" ? "Video render queue में है" : "Oracle server पर video render हो रही है") +
+            " · " + Number(status.renderProgress || 0) + "% · आप यह page बंद कर सकते हैं; server काम जारी रखेगा।"
+          );
+        }
+      }
+      if (status.renderStatus === "failed") throw new Error(status.renderError || "Server video rendering fail हुई।");
+      if (status.renderStatus === "ready" && status.renderedVideoFile) break;
+      if (status.renderStatus === "not_started") throw new Error("Server render start नहीं हुई। फिर कोशिश करें।");
+      await new Promise(resolve => setTimeout(resolve, 2200));
+    }
+
+    await loadJobs();
+    const completedJob = jobs.find(item => item.id === jobId);
+    if (!completedJob) throw new Error("Render complete हुई, लेकिन video job dashboard में नहीं मिली।");
+    if (activeJobId === jobId) {
+      activeJob = completedJob;
+      if (currentVideoUrl) URL.revokeObjectURL(currentVideoUrl);
+      currentVideoUrl = null;
+      currentVideoBlob = null;
+      currentVideoSavedLocally = false;
+      currentVideoNeedsUpload = false;
+      await restoreSavedRenderedVideo(completedJob);
+      if (completedJob.renderedSubtitleFile) {
+        const subtitleDownload = document.getElementById("subtitleDownload");
+        subtitleDownload.href = "/outputs/" + encodeURIComponent(completedJob.renderedSubtitleFile);
+        subtitleDownload.download = completedJob.renderedSubtitleFile;
+        subtitleDownload.textContent = "Download Hindi subtitles (.srt)";
+      }
+      setStudioStatus(
+        "Oracle पर video तैयार है · " + Number(completedJob.renderDurationSec || 0).toFixed(1) +
+        " sec · अब आप preview, review और approve कर सकते हैं।"
+      );
+      refreshBufferPublishControls();
+    }
+    return true;
+  }
+
   async function createSlideVideo() {
     if (!activeJob || !activeScriptData) {
-      setStudioStatus("पहले script generate करें।", true);
-      return;
+      setStudioStatus("पहले Hindi script generate करें।", true);
+      return false;
+    }
+    if (!activeJob.voiceFile) {
+      setStudioStatus("पहले Generate Hindi Voice करें।", true);
+      return false;
     }
     const button = document.getElementById("renderVideoBtn");
     button.disabled = true;
-    button.textContent = "Building video…";
-    setStudioStatus("Vertical slide video तैयार हो रहा है…");
+    button.textContent = "Queueing…";
+    setStudioStatus("Video Oracle Cloud render queue में भेजी जा रही है…");
     try {
-      const scenes = activeScriptData.scenes || [];
-      const canvas = document.createElement("canvas");
-      canvas.width = 1080;
-      canvas.height = 1920;
-      const context = canvas.getContext("2d");
-      const targetDuration = [15, 30, 45, 60].includes(Number(activeJob.duration))
-        ? Number(activeJob.duration)
-        : 45;
-      const introSec = targetDuration <= 15 ? 1.2 : targetDuration <= 30 ? 1.8 : targetDuration <= 45 ? 2.2 : 2.5;
-      const outroSec = introSec;
-      let audioBuffer = null;
-      let audioContext = null;
-
-      if (activeJob.voiceFile) {
-        try {
-          const audioResponse = await fetch(activeJob.voiceFile);
-          if (audioResponse.ok) {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            audioBuffer = await audioContext.decodeAudioData(await audioResponse.arrayBuffer());
-          }
-        } catch {
-          audioBuffer = null;
-        }
-      }
-
-      const voiceTailSec = 0.15;
-      const totalSec = audioBuffer
-        ? audioBuffer.duration + voiceTailSec
-        : targetDuration;
-      const contentSec = Math.max(0.5, totalSec - introSec - outroSec);
-      const totalWeight = scenes.reduce((sum, scene) => sum + Math.max(1, Number(scene.duration_sec || 5)), 0);
-      const visualPlan = getActiveVisualPlan();
-      const savedImages = Array.isArray(activeJob.sceneImages) ? activeJob.sceneImages : [];
-      const slides = [
-        { type: "intro", duration: introSec, title: activeScriptData.title, body: activeScriptData.hook }
-      ];
-      scenes.forEach((scene, index) => {
-        const sceneWeight = Math.max(1, Number(scene.duration_sec || 5));
-        const sceneDuration = contentSec * (sceneWeight / totalWeight);
-        const scenePlan = visualPlan.scenes[index] || { shotCount: 1, imageCount: 1 };
-        const shotCount = Math.max(1, Number(scenePlan.shotCount || 1));
-        const sceneCaptions = Array.isArray(scene.subtitle_segments) && scene.subtitle_segments.length
-          ? scene.subtitle_segments
-          : [scene.subtitle || scene.dialogue || ""].filter(Boolean);
-        const sceneImages = savedImages.filter(image => Number(image.sceneIndex) === index);
-        for (let shotIndex = 0; shotIndex < shotCount; shotIndex++) {
-          const variantCount = Math.max(1, Number(scenePlan.imageCount || 1));
-          const variantIndex = shotIndex % variantCount;
-          const selectedImage = sceneImages.find(image =>
-            (Number.isInteger(Number(image.variantIndex)) ? Number(image.variantIndex) : 0) === variantIndex
-          ) || sceneImages[0] || null;
-          const captionStart = Math.min(
-            Math.max(0, sceneCaptions.length - 1),
-            Math.floor(shotIndex * sceneCaptions.length / shotCount)
-          );
-          const captionEnd = Math.min(
-            sceneCaptions.length,
-            Math.max(captionStart + 1, Math.floor((shotIndex + 1) * sceneCaptions.length / shotCount))
-          );
-          const shotCaptions = sceneCaptions.slice(captionStart, captionEnd);
-          const reusedOriginalImage = shotIndex > 0 && variantIndex === 0;
-          const alternateMovement = ["slow pan left", "slow pull-out", "slow pan right"];
-          slides.push({
-            type: "scene",
-            duration: sceneDuration / shotCount,
-            title: "SCENE " + String(index + 1).padStart(2, "0") + " · SHOT " + String(shotIndex + 1),
-            body: scene.subtitle || scene.dialogue || "",
-            captions: shotCaptions.length ? shotCaptions : [sceneCaptions[sceneCaptions.length - 1] || scene.subtitle || ""].filter(Boolean),
-            visual: scene.visual_direction || "",
-            subtitle: shotIndex === 0 ? scene.subtitle || "" : "",
-            shotType: reusedOriginalImage
-              ? (String(scene.shot_type || "").toLowerCase().includes("wide") ? "close-up detail shot" : "wide environmental shot")
-              : selectedImage?.shotType || scene.shot_type || "medium shot",
-            cameraMovement: shotIndex === 0
-              ? selectedImage?.cameraMovement || scene.camera_movement || "gentle push-in"
-              : alternateMovement[(shotIndex - 1) % alternateMovement.length],
-            transition: shotIndex === 0 ? scene.transition || "hard cut" : "hard cut",
-            audioCue: scene.audio_cue || "",
-            imageUrl: selectedImage?.url || ""
-          });
-        }
+      const response = await fetch("/api/jobs/" + encodeURIComponent(activeJob.id) + "/render", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({})
       });
-      slides.push({ type: "outro", duration: outroSec, title: "ANTARDRISHTI", body: activeScriptData.cta || "और जानने के लिए follow करें।" });
-
-      for (const slide of slides) {
-        if (!slide.imageUrl) continue;
-        slide.imageElement = await new Promise(resolve => {
-          const image = new Image();
-          let settled = false;
-          const finish = value => {
-            if (settled) return;
-            settled = true;
-            clearTimeout(imageTimeout);
-            resolve(value);
-          };
-          const imageTimeout = setTimeout(() => finish(null), 15000);
-          image.onload = () => finish(image);
-          image.onerror = () => finish(null);
-          image.src = slide.imageUrl + "?v=" + Date.now();
-        });
-      }
-
-      if (!brandLogoMeta) await loadBrandLogo();
-      if (brandLogoMeta && brandLogoLoadPromise) {
-        await Promise.race([
-          brandLogoLoadPromise,
-          new Promise(resolve => setTimeout(() => resolve(false), 10000))
-        ]);
-      }
-
-      const canvasStream = canvas.captureStream(30);
-      let mixedStream = canvasStream;
-      let audioSource = null;
-      let audioDestination = null;
-      if (audioBuffer && audioContext) {
-        audioDestination = audioContext.createMediaStreamDestination();
-        audioSource = audioContext.createBufferSource();
-        audioSource.buffer = audioBuffer;
-        audioSource.connect(audioDestination);
-        audioDestination.stream.getAudioTracks().forEach(track => canvasStream.addTrack(track));
-        mixedStream = canvasStream;
-      }
-
-      const mimeCandidates = [
-        "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
-        "video/mp4",
-        "video/webm;codecs=vp9,opus",
-        "video/webm"
-      ];
-      const chosenMime = mimeCandidates.find(type => MediaRecorder.isTypeSupported(type)) || "";
-      const recorder = new MediaRecorder(mixedStream, chosenMime ? { mimeType: chosenMime } : undefined);
-      const chunks = [];
-      recorder.ondataavailable = event => { if (event.data && event.data.size) chunks.push(event.data); };
-      const stopped = new Promise((resolve, reject) => {
-        recorder.onstop = resolve;
-        recorder.onerror = () => reject(new Error("Browser video recorder failed."));
-      });
-
-      function drawSlide(slide, slideIndex, elapsed) {
-        const w = canvas.width, h = canvas.height;
-        if (slide.imageElement) {
-          const image = slide.imageElement;
-          const progress = Math.min(1, Math.max(0, elapsed / Math.max(0.1, slide.duration)));
-          const baseScale = Math.max(w / image.width, h / image.height);
-          const movement = String(slide.cameraMovement || "").toLowerCase();
-          const framing = String(slide.shotType || "").toLowerCase();
-          let startScale = 1.015;
-          let endScale = 1.06;
-          if (/push.?in|zoom.?in|dolly.?in/.test(movement)) {
-            startScale = 1.04;
-            endScale = 1.12;
-          } else if (/pull.?out|zoom.?out|dolly.?out/.test(movement)) {
-            startScale = 1.12;
-            endScale = 1.04;
-          } else {
-            startScale = 1.04;
-            endScale = 1.07;
-          }
-          const movementScale = /tilt/.test(movement) ? 1.06 : 1.0;
-          const framingScale = (/close.?up|detail/.test(framing) ? 1.1 : /wide/.test(framing) ? 1.02 : 1.04) * movementScale;
-          const motionScale = framingScale * (startScale + (endScale - startScale) * progress);
-          const imageWidth = image.width * baseScale * motionScale;
-          const imageHeight = image.height * baseScale * motionScale;
-          let driftX = Math.sin(progress * Math.PI) * 18;
-          let driftY = (0.5 - progress) * 14;
-          if (/pan left|move left|tracking left/.test(movement)) driftX += progress * 82;
-          else if (/pan right|move right|tracking right/.test(movement)) driftX -= progress * 82;
-          if (/tilt up|move up/.test(movement)) driftY += progress * 36;
-          else if (/tilt down|move down/.test(movement)) driftY -= progress * 36;
-          context.drawImage(
-            image,
-            (w - imageWidth) / 2 + driftX,
-            (h - imageHeight) / 2 + driftY,
-            imageWidth,
-            imageHeight
-          );
-          context.fillStyle = "rgba(8, 17, 30, 0.38)";
-          context.fillRect(0, 0, w, h);
-        } else {
-          const gradient = context.createLinearGradient(0, 0, w, h);
-          gradient.addColorStop(0, "#0d1728");
-          gradient.addColorStop(0.55, "#1a2b42");
-          gradient.addColorStop(1, "#31271e");
-          context.fillStyle = gradient;
-          context.fillRect(0, 0, w, h);
-        }
-
-        if (slide.imageElement) {
-          const headerShade = context.createLinearGradient(0, 0, 0, 265);
-          headerShade.addColorStop(0, "rgba(7, 15, 28, 0.94)");
-          headerShade.addColorStop(1, "rgba(7, 15, 28, 0)");
-          context.fillStyle = headerShade;
-          context.fillRect(0, 0, w, 265);
-        }
-        context.fillStyle = "#e0bd7b";
-        context.font = "600 30px Arial, 'Noto Sans Devanagari', sans-serif";
-        context.fillText("ANTARDRISHTI", 76, 292);
-        context.fillStyle = "#d5dfeb";
-        context.font = "24px Arial, 'Noto Sans Devanagari', sans-serif";
-        context.fillText("आत्म-जागरूकता", 78, 338);
-
-        context.strokeStyle = "#8f7349";
-        context.lineWidth = 3;
-        context.beginPath();
-        context.moveTo(78, 375);
-        context.lineTo(920, 375);
-        context.stroke();
-
-        drawBrandLogo(context, w, h);
-
-        if (slide.type === "intro") {
-          context.fillStyle = "#e2bd78";
-          context.font = "600 30px Arial, 'Noto Sans Devanagari', sans-serif";
-          context.fillText("अपने लिए एक छोटा विराम", 78, 600);
-          context.fillStyle = "#f4f0e8";
-          context.font = "600 78px Arial, 'Noto Sans Devanagari', sans-serif";
-          const titleLines = wrapCanvasText(context, slide.title, 78, 760, 910, 100, 4);
-          context.fillStyle = "#d5dfeb";
-          context.font = "42px Arial, 'Noto Sans Devanagari', sans-serif";
-          wrapCanvasText(context, slide.body, 82, 840 + titleLines * 82, 900, 62, 4);
-        } else if (slide.type === "outro") {
-          context.fillStyle = "#e4c488";
-          context.font = "600 44px Georgia, serif";
-          context.fillText("ANTARDRISHTI", 78, 650);
-          context.fillStyle = "#f4f0e8";
-          context.font = "600 62px Arial, 'Noto Sans Devanagari', sans-serif";
-          wrapCanvasText(context, slide.body, 78, 810, 900, 82, 5);
-        } else {
-          const sceneCaptions = Array.isArray(slide.captions) && slide.captions.length
-            ? slide.captions : [slide.body || ""];
-          const captionIndex = Math.min(
-            sceneCaptions.length - 1,
-            Math.floor((Math.max(0, elapsed) / Math.max(0.1, slide.duration)) * sceneCaptions.length)
-          );
-          const activeCaption = sceneCaptions[captionIndex] || slide.body || "";
-          if (slide.subtitle) {
-            context.fillStyle = "#e2bd78";
-            context.font = "600 40px Arial, 'Noto Sans Devanagari', sans-serif";
-            wrapCanvasText(context, slide.subtitle, 78, 680, 900, 58, 2);
-          }
-          context.fillStyle = "#f5f1e9";
-          context.font = "600 58px Arial, 'Noto Sans Devanagari', sans-serif";
-          wrapCanvasText(context, activeCaption, 78, slide.subtitle ? 825 : 760, 900, 84, 6);
-          if (!slide.imageElement) {
-            context.save();
-            context.globalAlpha = 0.18;
-            context.strokeStyle = "#d8b576";
-            context.lineWidth = 3;
-            for (let ring = 0; ring < 4; ring++) {
-              context.beginPath();
-              context.arc(850, 1320, 90 + ring * 62 + Math.sin(elapsed * 0.35 + ring) * 8, 0, Math.PI * 2);
-              context.stroke();
-            }
-            context.restore();
-          }
-
-        }
-
-        context.fillStyle = "#d8b576";
-        context.fillRect(78, 1500, 760 * ((slideIndex + 1) / slides.length), 5);
-      }
-
-      let lastRenderedSlideIndex = -1;
-      let transitionFrameCanvas = null;
-
-      function renderAt(elapsedSec) {
-        let cursor = 0;
-        let selectedIndex = slides.length - 1;
-        for (let i = 0; i < slides.length; i++) {
-          if (elapsedSec < cursor + slides[i].duration || i === slides.length - 1) {
-            selectedIndex = i;
-            break;
-          }
-          cursor += slides[i].duration;
-        }
-
-        const slide = slides[selectedIndex];
-        const localElapsed = elapsedSec - cursor;
-        if (selectedIndex !== lastRenderedSlideIndex) {
-          const previousTransition = selectedIndex > 0
-            ? String(slides[selectedIndex - 1].transition || "").toLowerCase()
-            : "";
-          if (lastRenderedSlideIndex >= 0 && /dissolve|cross.?fade|fade/.test(previousTransition)) {
-            if (!transitionFrameCanvas) {
-              transitionFrameCanvas = document.createElement("canvas");
-              transitionFrameCanvas.width = canvas.width;
-              transitionFrameCanvas.height = canvas.height;
-            }
-            const transitionContext = transitionFrameCanvas.getContext("2d");
-            transitionContext.clearRect(0, 0, canvas.width, canvas.height);
-            transitionContext.drawImage(canvas, 0, 0);
-          } else {
-            transitionFrameCanvas = null;
-          }
-          lastRenderedSlideIndex = selectedIndex;
-        }
-
-        drawSlide(slide, selectedIndex, localElapsed);
-        if (transitionFrameCanvas && localElapsed < 0.45) {
-          context.save();
-          context.globalAlpha = 1 - Math.min(1, localElapsed / 0.45);
-          context.drawImage(transitionFrameCanvas, 0, 0);
-          context.restore();
-        } else {
-          transitionFrameCanvas = null;
-        }
-      }
-
-      recorder.start(500);
-      let animationStart = null;
-      let renderFinished = false;
-      let renderError = null;
-      const hardStopTimer = setTimeout(() => {
-        if (!renderFinished && recorder.state === "recording") {
-          renderError = new Error("Browser ने video rendering बीच में रोक दी। Create Slide Video से दोबारा कोशिश करें।");
-          recorder.stop();
-        }
-      }, (totalSec + 20) * 1000);
-
-      function animate(timestamp) {
-        try {
-          if (animationStart === null) animationStart = timestamp;
-          const elapsed = (timestamp - animationStart) / 1000;
-          renderAt(Math.min(elapsed, totalSec));
-          if (elapsed < totalSec) requestAnimationFrame(animate);
-          else {
-            renderFinished = true;
-            if (recorder.state === "recording") recorder.stop();
-          }
-        } catch (error) {
-          renderError = error;
-          if (recorder.state === "recording") recorder.stop();
-        }
-      }
-      requestAnimationFrame(animate);
-      if (audioContext && audioContext.state === "suspended") {
-        await audioContext.resume();
-      }
-      if (audioSource) {
-        try { audioSource.start(0); } catch { /* Audio may have been stopped by the browser. */ }
-      }
-
-      let stopTimeoutId;
-      try {
-        await Promise.race([
-          stopped,
-          new Promise((_, reject) => {
-            stopTimeoutId = setTimeout(
-              () => reject(new Error("Browser video recorder ने समय पर response नहीं दिया। Page खुला रखकर फिर कोशिश करें।")),
-              (totalSec + 45) * 1000
-            );
-          })
-        ]);
-      } finally {
-        clearTimeout(hardStopTimer);
-        clearTimeout(stopTimeoutId);
-      }
-      if (renderError) throw renderError;
-      if (!renderFinished) {
-        throw new Error("Video rendering पूरा नहीं हुआ। Page खुला रखकर Create Slide Video दोबारा चलाएँ।");
-      }
-
-      const mimeType = recorder.mimeType || chosenMime || "video/webm";
-      const extension = mimeType.includes("mp4") ? "mp4" : "webm";
-      const blob = new Blob(chunks, { type: mimeType });
-      if (blob.size < 1000) throw new Error("Video file नहीं बन पाई। फिर कोशिश करें।");
-
-      if (currentVideoUrl) URL.revokeObjectURL(currentVideoUrl);
-      currentVideoBlob = blob;
-      currentVideoJobId = activeJob.id;
-      currentVideoSavedLocally = false;
-      currentVideoExtension = extension;
-      currentVideoNeedsUpload = true;
-      currentVideoUrl = URL.createObjectURL(blob);
-
-      let localSaveMessage = "Video केवल इस browser tab में है। Refresh से पहले Download video दबाकर सुरक्षित रखें।";
-      try {
-        const saveResponse = await fetch("/api/jobs/" + encodeURIComponent(activeJob.id) + "/rendered-video", {
-          method: "PUT",
-          headers: { "Content-Type": mimeType.split(";")[0] },
-          body: blob
-        });
-        const saved = await saveResponse.json().catch(() => ({}));
-        if (!saveResponse.ok) throw new Error(saved.error || "Project outputs folder में save नहीं हो पाई।");
-        activeJob = saved.job;
-        currentVideoSavedLocally = true;
-        localSaveMessage = "Project outputs में सुरक्षित save हो गई · refresh या server restart के बाद भी वापस खुलेगी।";
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "Cloud render queue में video नहीं जा सकी।");
+      if (result.job) {
+        activeJob = result.job;
         await loadJobs();
-        refreshBufferPublishControls();
-      } catch (saveError) {
-        localSaveMessage = "Local save नहीं हो पाई: " + (saveError.message || "Unknown error") +
-          " · Refresh से पहले Download video दबाएँ।";
       }
-      const videoPreview = document.getElementById("videoPreview");
-      videoPreview.src = currentVideoUrl;
-      const download = document.getElementById("videoDownload");
-      download.href = currentVideoUrl;
-      download.download = "antardrishti-" + activeJob.id.slice(0, 8) + "." + extension;
-      download.textContent = "Download " + extension.toUpperCase() + " video (" + Math.round(blob.size / 1024 / 1024 * 10) / 10 + " MB)";
-
-      if (currentSubtitleUrl) URL.revokeObjectURL(currentSubtitleUrl);
-      const subtitleBlob = new Blob([buildSrt(slides)], { type: "text/plain;charset=utf-8" });
-      currentSubtitleUrl = URL.createObjectURL(subtitleBlob);
-      const subtitleDownload = document.getElementById("subtitleDownload");
-      subtitleDownload.href = currentSubtitleUrl;
-      subtitleDownload.download = "antardrishti-" + activeJob.id.slice(0, 8) + "-hi.srt";
-      subtitleDownload.textContent = "Download Hindi subtitles (.srt)";
-
-      document.getElementById("videoResult").style.display = "block";
-      setStudioStatus(
-        "Slide video और Hindi subtitle file तैयार हैं · final video लगभग " +
-        totalSec.toFixed(1) + " sec। " +
-        (audioBuffer ? "Video की अवधि actual Hindi voice के अनुसार रखी गई है।" : "Voice के बिना selected duration इस्तेमाल हुई है।") + localSaveMessage
-      );
-      if (audioContext) await audioContext.close();
-      return true;
+      setStudioStatus("Server ने render request स्वीकार कर ली। आप page बंद कर सकते हैं; Oracle पर rendering जारी रहेगी।");
+      return await monitorCloudRender(activeJob.id);
     } catch (error) {
-      setStudioStatus(error.message || "Video render नहीं हो पाया।", true);
+      setStudioStatus(error.message || "Cloud video render नहीं हो पाई।", true);
       return false;
     } finally {
-      button.disabled = false;
-      button.textContent = "Create Slide Video";
+      button.disabled = !activeScriptData || !activeJob?.voiceFile;
+      button.textContent = "Render on Cloud";
     }
   }
 
