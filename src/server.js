@@ -150,8 +150,8 @@ app.use((req, res, next) => {
   return res.redirect("/login.html");
 });
 
-const DATA_DIR = path.join(__dirname, "..", "data");
-const OUTPUT_DIR = path.join(__dirname, "..", "outputs");
+const DATA_DIR = path.resolve(process.env.ANTARDRISHTI_DATA_DIR || path.join(__dirname, "..", "data"));
+const OUTPUT_DIR = path.resolve(process.env.ANTARDRISHTI_OUTPUT_DIR || path.join(__dirname, "..", "outputs"));
 const JOBS_FILE = path.join(DATA_DIR, "jobs.json");
 const BRAND_LOGO_META_FILE = path.join(DATA_DIR, "brand-logo.json");
 const GEMINI_TEXT_MODEL = "gemini-3.8-flash";
