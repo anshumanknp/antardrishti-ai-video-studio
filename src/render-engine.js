@@ -72,7 +72,7 @@ function filterPath(value) {
 function textFileFilter(fontPath, textPath, x, y, fontSize, color) {
   return "drawtext=fontfile='" + filterPath(fontPath) + "':textfile='" + filterPath(textPath) +
     "':x=" + x + ":y=" + y + ":fontsize=" + fontSize + ":fontcolor=" + color +
-    ":line_spacing=18:borderw=2:bordercolor=black@0.45";
+    ":line_spacing=18:expansion=none:borderw=2:bordercolor=black@0.45";
 }
 
 function writeTextFile(directory, name, text) {
@@ -97,9 +97,8 @@ function runFfmpeg(args, options = {}) {
   const totalDuration = Math.max(0.1, Number(options.totalDuration) || 1);
   return new Promise((resolve, reject) => {
     const child = spawn(binary, [
-      "-hide_banner", "-loglevel", "error", "-y",
-      ...args,
-      "-progress", "pipe:1", "-nostats"
+      "-hide_banner", "-loglevel", "error", "-y", "-progress", "pipe:1", "-nostats",
+      ...args
     ], { stdio: ["ignore", "pipe", "pipe"] });
     let stderr = "";
     let stdoutBuffer = "";
@@ -215,20 +214,20 @@ function makeFilterGraph(slide, slideIndex, totalSlides, inputHasImage, hasLogo,
     filters.push("drawbox=c=black@0.38:t=fill");
   }
   filters.push(
-    textFileFilter(fontPath, textPaths.brand, 76, 260, 30, "#e0bd7b"),
-    textFileFilter(fontPath, textPaths.tagline, 78, 308, 24, "#d5dfeb"),
-    "drawbox=x=78:y=375:w=842:h=3:color=#8f7349:t=fill"
+    textFileFilter(fontPath, textPaths.brand, 76, 260, 30, "0xe0bd7b"),
+    textFileFilter(fontPath, textPaths.tagline, 78, 308, 24, "0xd5dfeb"),
+    "drawbox=x=78:y=375:w=842:h=3:color=0x8f7349:t=fill"
   );
 
   if (slide.type === "intro") {
-    filters.push(textFileFilter(fontPath, textPaths.kicker, 78, 600, 32, "#e2bd78"));
-    filters.push(textFileFilter(fontPath, textPaths.title, 78, 760, 70, "#f4f0e8"));
-    filters.push(textFileFilter(fontPath, textPaths.body, 82, 1120, 44, "#d5dfeb"));
+    filters.push(textFileFilter(fontPath, textPaths.kicker, 78, 600, 32, "0xe2bd78"));
+    filters.push(textFileFilter(fontPath, textPaths.title, 78, 760, 70, "0xf4f0e8"));
+    filters.push(textFileFilter(fontPath, textPaths.body, 82, 1120, 44, "0xd5dfeb"));
   } else if (slide.type === "outro") {
-    filters.push(textFileFilter(fontPath, textPaths.title, 78, 650, 50, "#e4c488"));
-    filters.push(textFileFilter(fontPath, textPaths.body, 78, 810, 62, "#f4f0e8"));
+    filters.push(textFileFilter(fontPath, textPaths.title, 78, 650, 50, "0xe4c488"));
+    filters.push(textFileFilter(fontPath, textPaths.body, 78, 810, 62, "0xf4f0e8"));
   } else {
-    if (textPaths.subtitle) filters.push(textFileFilter(fontPath, textPaths.subtitle, 78, 680, 38, "#e2bd78"));
+    if (textPaths.subtitle) filters.push(textFileFilter(fontPath, textPaths.subtitle, 78, 680, 38, "0xe2bd78"));
     if (slideSrtPath) {
       filters.push(
         "subtitles=filename='" + filterPath(slideSrtPath) + "':fontsdir='" +
@@ -239,7 +238,7 @@ function makeFilterGraph(slide, slideIndex, totalSlides, inputHasImage, hasLogo,
   }
 
   const progressWidth = Math.max(1, Math.round(760 * ((slideIndex + 1) / totalSlides)));
-  filters.push("drawbox=x=78:y=1500:w=" + progressWidth + ":h=5:color=#d8b576:t=fill");
+  filters.push("drawbox=x=78:y=1500:w=" + progressWidth + ":h=5:color=0xd8b576:t=fill");
   const base = filters.join(",");
   if (hasLogo) {
     return "[0:v]" + base + "[base];[1:v]scale=170:-1[logo];[base][logo]overlay=x=840:y=170:shortest=1,format=yuv420p[outv]";
