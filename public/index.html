@@ -602,7 +602,7 @@
         <p class="privacy-note">Free-tier AI requests are sent to Google. Do not include client names, private therapy notes or other sensitive personal information. Generated scripts need your review before publication.</p>
       </div>
     </dialog>
-    <p class="footer-note">यह dashboard video briefs और production status manage करता है। Script Studio में Hindi script, voice, scene images, subtitles और browser-based video rendering उपलब्ध हैं। Buffer Queue में post भेजने से पहले dashboard में status Approved होना जरूरी है।</p>
+    <p class="footer-note">यह dashboard video briefs और production status manage करता है। Script Studio में Hindi script, voice, scene images, subtitles और cloud-based video rendering उपलब्ध हैं। Buffer Queue में post भेजने से पहले dashboard में status Approved होना जरूरी है।</p>
   </main>
 </div>
 
@@ -1733,7 +1733,7 @@
       voicePlayer.removeAttribute("src");
       voicePlayer.load();
     }
-    document.getElementById("renderVideoBtn").disabled = !activeScriptData;
+    document.getElementById("renderVideoBtn").disabled = !activeScriptData || ["queued", "processing"].includes(job.renderStatus);
     document.getElementById("generateVoiceBtn").disabled = !activeScriptData;
     document.getElementById("autoCreateVideoBtn").disabled = !imageGenerationEnabled || !activeScriptData;
   }
@@ -1760,8 +1760,78 @@
     download.download = "antardrishti-" + job.id.slice(0, 8) + "." + currentVideoExtension;
     download.textContent = "Download " + currentVideoExtension.toUpperCase() + " video (" + Math.round(blob.size / 1024 / 1024 * 10) / 10 + " MB)";
     document.getElementById("videoResult").style.display = "block";
+    if (job.renderedSubtitleFile) {
+      const subtitleDownload = document.getElementById("subtitleDownload");
+      subtitleDownload.href = "/outputs/" + encodeURIComponent(job.renderedSubtitleFile);
+      subtitleDownload.download = job.renderedSubtitleFile;
+      subtitleDownload.textContent = "Download Hindi subtitles (.srt)";
+    }
     refreshBufferPublishControls();
     return true;
+  }
+
+  async function monitorServerRender(jobId) {
+    while (true) {
+      const response = await fetch("/api/jobs/" + encodeURIComponent(jobId) + "/render-status", { cache: "no-store" });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "Render status नहीं मिल पाया।");
+      const task = result.task;
+      if (!task) throw new Error("इस video के लिए render task नहीं मिला।");
+      if (task.status === "completed") {
+        await loadJobs();
+        activeJob = jobs.find(item => item.id === jobId) || result.job;
+        await restoreSavedRenderedVideo(activeJob);
+        if (activeJob.renderedSubtitleFile) {
+          const subtitleDownload = document.getElementById("subtitleDownload");
+          subtitleDownload.href = "/outputs/" + encodeURIComponent(activeJob.renderedSubtitleFile);
+          subtitleDownload.download = activeJob.renderedSubtitleFile;
+          subtitleDownload.textContent = "Download Hindi subtitles (.srt)";
+        }
+        setStudioStatus("Oracle Cloud पर video तैयार है · MP4 और Hindi subtitles सुरक्षित हैं। अब preview, approve या Buffer पर schedule करें।");
+        return true;
+      }
+      if (task.status === "failed") {
+        throw new Error(task.error || result.job?.renderError || "Server rendering fail हो गई।");
+      }
+      const progress = Number(task.progress || 0);
+      setStudioStatus((task.stage || "Oracle Cloud पर rendering चल रही है") + " · " + progress + "% complete. आप दूसरी screen खोल सकते हैं; server काम जारी रखेगा।");
+      await new Promise(resolve => setTimeout(resolve, 2500));
+    }
+  }
+
+  async function createSlideVideo() {
+    if (!activeJob || !activeScriptData) {
+      setStudioStatus("पहले script generate करें।", true);
+      return false;
+    }
+    let mode = null;
+    try {
+      const modeResponse = await fetch("/api/rendering/mode", { cache: "no-store" });
+      if (modeResponse.ok) mode = await modeResponse.json();
+    } catch { /* Use the existing browser renderer when the local server has no FFmpeg. */ }
+    if (!mode?.serverSideAvailable) return createSlideVideoInBrowser();
+
+    const button = document.getElementById("renderVideoBtn");
+    button.disabled = true;
+    button.textContent = "Sending to Cloud…";
+    setStudioStatus("Video Oracle Cloud की render queue में भेजी जा रही है…");
+    try {
+      const response = await fetch("/api/jobs/" + encodeURIComponent(activeJob.id) + "/render", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({})
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "Cloud render queue में video नहीं भेज पाए।");
+      activeJob = result.job || activeJob;
+      return await monitorServerRender(activeJob.id);
+    } catch (error) {
+      setStudioStatus(error.message || "Cloud rendering शुरू नहीं हो पाई।", true);
+      return false;
+    } finally {
+      button.disabled = !activeScriptData;
+      button.textContent = "Create Slide Video";
+    }
   }
 
   async function openScriptStudio(jobId) {
@@ -1783,13 +1853,24 @@
     if (activeJob.renderedVideoFile) {
       try {
         await restoreSavedRenderedVideo(activeJob);
+        if (activeJob.renderedSubtitleFile) {
+          const subtitleDownload = document.getElementById("subtitleDownload");
+          subtitleDownload.href = "/outputs/" + encodeURIComponent(activeJob.renderedSubtitleFile);
+          subtitleDownload.download = activeJob.renderedSubtitleFile;
+          subtitleDownload.textContent = "Download Hindi subtitles (.srt)";
+        }
         setStudioStatus("Saved final video वापस आ गई। यह project outputs folder में सुरक्षित है।");
       } catch (error) {
         setStudioStatus(error.message || "Saved video restore नहीं हो पाई।", true);
       }
+    } else if (["queued", "processing"].includes(activeJob.renderStatus)) {
+      document.getElementById("renderVideoBtn").disabled = true;
+      try { await monitorServerRender(jobId); }
+      catch (error) { setStudioStatus(error.message || "Cloud rendering status नहीं मिल पाया।", true); }
+      finally { document.getElementById("renderVideoBtn").disabled = !activeJob?.scriptData; }
     }
     if (!activeJob.scriptData) await generateScript(true);
-    else if (!activeJob.renderedVideoFile) setStudioStatus("Script तैयार है। Edit करें या अगला step चुनें।");
+    else if (!activeJob.renderedVideoFile && !["queued", "processing"].includes(activeJob.renderStatus)) setStudioStatus("Script तैयार है। Edit करें या अगला step चुनें।");
   }
 
   async function generateScript(opening = false) {
@@ -2024,7 +2105,7 @@
     return entries.join("\n\n") + "\n";
   }
 
-  async function createSlideVideo() {
+  async function createSlideVideoInBrowser() {
     if (!activeJob || !activeScriptData) {
       setStudioStatus("पहले script generate करें।", true);
       return;
