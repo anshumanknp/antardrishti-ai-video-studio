@@ -1,5 +1,26 @@
 import { resetBufferApprovalIfContentChanged } from "./publishing-guard.js";
 
+import fs from "node:fs";
+import path from "node:path";
+import { createHash } from "node:crypto";
+import { resetBufferApprovalIfContentChanged } from "./publishing-guard.js";
+
+function renderInputFingerprint(job) {
+  const input = {
+    topic: job.topic,
+    duration: job.duration,
+    script: job.script,
+    scriptData: job.scriptData,
+    sceneImages: job.sceneImages,
+    voiceFile: job.voiceFile,
+    voiceDurationSec: job.voiceDurationSec,
+    voiceMode: job.voiceMode,
+    femaleVoice: job.femaleVoice,
+    maleVoice: job.maleVoice
+  };
+  return createHash("sha256").update(JSON.stringify(input)).digest("hex");
+}
+
 export function createRenderQueue(options = {}) {
   const readJobs = options.readJobs;
   const writeJobs = options.writeJobs;
@@ -78,7 +99,10 @@ export function createRenderQueue(options = {}) {
     try {
       while (!stopped) {
         const jobs = readJobs();
-        const next = jobs.find(item => item.renderStatus === "queued");
+        const next = jobs
+          .filter(item => item.renderStatus === "queued")
+          .sort((left, right) => Date.parse(left.renderQueuedAt || left.createdAt || 0) -
+            Date.parse(right.renderQueuedAt || right.createdAt || 0))[0];
         if (!next) break;
         const jobId = next.id;
         next.renderStatus = "rendering";
@@ -88,6 +112,7 @@ export function createRenderQueue(options = {}) {
         next.updatedAt = new Date().toISOString();
         writeJobs(jobs);
         const snapshot = JSON.parse(JSON.stringify(next));
+        const inputFingerprint = renderInputFingerprint(snapshot);
         let lastProgressWrite = 0;
 
         try {
@@ -105,6 +130,18 @@ export function createRenderQueue(options = {}) {
               });
             }
           });
+          const latestJob = readJobs().find(item => item.id === jobId);
+          if (!latestJob || renderInputFingerprint(latestJob) !== inputFingerprint) {
+            if (result.fileName) fs.rmSync(path.join(outputDir, path.basename(result.fileName)), { force: true });
+            if (result.srtFile) fs.rmSync(path.join(outputDir, path.basename(result.srtFile)), { force: true });
+            updateJob(jobId, job => {
+              job.renderStatus = "failed";
+              job.renderError = "Video content rendering के दौरान बदल गया। नया render शुरू करें।";
+              job.renderProgress = 0;
+              job.renderCompletedAt = new Date().toISOString();
+            });
+            continue;
+          }
           updateJob(jobId, job => {
             job.renderStatus = "ready";
             job.renderProgress = 100;
