@@ -1274,7 +1274,7 @@
   }
 
   function dateTimeLocalToIso(value, timeZone) {
-    const match = /^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})$/.exec(String(value || ""));
+    const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(String(value || ""));
     if (!match) throw new Error("हर custom schedule के लिए पूरी date और time चुनें।");
     const [, year, month, day, hour, minute] = match.map((part, index) => index ? Number(part) : part);
     const targetWallTime = Date.UTC(year, month - 1, day, hour, minute);
