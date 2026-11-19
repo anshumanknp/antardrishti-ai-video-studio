@@ -1376,6 +1376,62 @@ app.get("/api/jobs/:id/render-status", (req, res) => {
   res.json({ ok: true, render });
 });
 
+app.post("/api/jobs/:id/host-video", async (req, res) => {
+  const { jobs, job } = findJob(req.params.id);
+  if (!job) return res.status(404).json({ error: "Video brief not found." });
+  if (!job.renderedVideoFile) return res.status(400).json({ error: "पहले server पर final video render करें।" });
+  if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
+    return res.status(503).json({ error: "Cloudinary configure नहीं है। Server environment में CLOUDINARY_CLOUD_NAME और CLOUDINARY_UPLOAD_PRESET सेट करें।" });
+  }
+
+  try {
+    const fileName = path.basename(job.renderedVideoFile);
+    const filePath = path.join(OUTPUT_DIR, fileName);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: "Rendered video file server पर नहीं मिली।" });
+    const stat = fs.statSync(filePath);
+    if (!stat.size || stat.size > 450 * 1024 * 1024) {
+      return res.status(413).json({ error: "Video file खाली है या 450 MB से बड़ी है।" });
+    }
+
+    const fileBuffer = await fs.promises.readFile(filePath);
+    const formData = new FormData();
+    formData.append("file", new Blob([fileBuffer], { type: "video/mp4" }), fileName);
+    formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
+    formData.append("folder", "antardrishti");
+
+    const endpoint = "https://api.cloudinary.com/v1_1/" +
+      encodeURIComponent(CLOUDINARY_CLOUD_NAME) + "/video/upload";
+    const response = await fetch(endpoint, {
+      method: "POST",
+      body: formData,
+      signal: AbortSignal.timeout(180000)
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = payload?.error?.message || "Cloudinary upload failed (HTTP " + response.status + ").";
+      return res.status(response.status === 413 ? 413 : 502).json({ error: String(message).slice(0, 500) });
+    }
+
+    const videoUrl = String(payload.secure_url || "");
+    if (!validatePublicVideoUrl(videoUrl)) {
+      return res.status(502).json({ error: "Cloudinary ने valid public HTTPS video URL नहीं लौटाया।" });
+    }
+
+    job.bufferVideoUrl = videoUrl;
+    job.bufferVideoUploadedAt = new Date().toISOString();
+    job.updatedAt = new Date().toISOString();
+    writeJobs(jobs);
+    res.json({ ok: true, videoUrl, job, bytesUploaded: stat.size });
+  } catch (error) {
+    const timedOut = error?.name === "TimeoutError" || error?.name === "AbortError";
+    res.status(timedOut ? 504 : 502).json({
+      error: timedOut
+        ? "Cloudinary upload में 3 minutes लग गए। Server log और Cloudinary status जाँचें।"
+        : error.message || "Cloudinary पर server से video upload नहीं हो पाई।"
+    });
+  }
+});
+
 app.put("/api/jobs/:id/rendered-video", express.raw({ type: "video/*", limit: "250mb" }), async (req, res) => {
   const { jobs, job } = findJob(req.params.id);
   if (!job) return res.status(404).json({ error: "Video brief not found." });
