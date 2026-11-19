@@ -213,3 +213,71 @@ Avoid claims that hypnotherapy or past-life regression can diagnose, cure, or re
 ## Security
 
 Keep API keys in a local `.env` file or deployment secrets. Never commit credentials.
+
+
+## Cloud rendering and mobile access (Oracle VM)
+
+The dashboard can submit video rendering to the server. The render worker uses FFmpeg to create a 1080×1920 MP4 from the saved script, generated scene images, Hindi narration, subtitles and optional brand logo. The render queue is stored with the job records, runs one job at a time, and re-queues an interrupted render after a server restart. The mobile browser checks render status and streams the finished MP4 from the server; it does not keep the render running in the browser.
+
+### Oracle Ubuntu VM prerequisites
+
+Use a supported Node.js 20 or newer runtime. Install FFmpeg and the Noto Devanagari fonts:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ffmpeg fonts-noto-core
+ffmpeg -version
+```
+
+The default font path is `/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf`. Set `ANTARDRISHTI_FONT_PATH` if your Ubuntu image provides it elsewhere.
+
+### Persistent runtime directories
+
+Create persistent paths outside the Git checkout:
+
+```bash
+sudo install -d -o antardrishti -g antardrishti -m 750 /var/lib/antardrishti/data
+sudo install -d -o antardrishti -g antardrishti -m 750 /var/lib/antardrishti/outputs
+```
+
+Set these server environment values:
+
+```env
+ANTARDRISHTI_DATA_DIR=/var/lib/antardrishti/data
+ANTARDRISHTI_OUTPUT_DIR=/var/lib/antardrishti/outputs
+```
+
+The runtime data, jobs, brand settings, audio, scene images and rendered MP4s should stay on the persistent volume and must not be overwritten by a Git checkout update. Back up both directories regularly. A backup on the same VM is not an off-site backup; copy backups to a separate storage location and test restoring them before relying on them.
+
+### Required administrator login
+
+Do not expose this application to the public internet without administrator authentication and HTTPS. Production startup intentionally fails unless both `ADMIN_PASSWORD` and `ADMIN_SESSION_SECRET` are set.
+
+Generate a long session secret on the VM:
+
+```bash
+openssl rand -base64 48
+```
+
+Set the following values in a protected environment file (not in GitHub):
+
+```env
+NODE_ENV=production
+ADMIN_USERNAME=administrator
+ADMIN_PASSWORD=use-a-long-unique-password
+ADMIN_SESSION_SECRET=paste-the-generated-random-secret
+```
+
+Use a unique password of at least 12 characters and keep the environment file readable only by the service account. The login session cookie is HttpOnly, Secure in production and expires after 12 hours. Eight failed login attempts from the same client are temporarily rate-limited.
+
+### Mobile installation
+
+Open the deployed HTTPS address in Android Chrome, sign in, then use Chrome's menu → **Add to Home screen** (or **Install app**, when shown). The service worker does not cache private API responses, login sessions or video files. An internet connection is required for the dashboard and rendering.
+
+### Render API
+
+- `POST /api/jobs/:id/render` adds a video job to the background render queue.
+- `GET /api/jobs/:id/render-status` returns queued, rendering, ready or failed status and progress.
+- `POST /api/jobs/:id/host-video` uploads an approved server-rendered MP4 to the configured Cloudinary unsigned preset from the Oracle VM; the phone does not need to download the MP4 before Buffer publishing.
+
+The existing browser render upload endpoint remains for compatibility with older local workflows. The Oracle server render endpoint requires FFmpeg and a Hindi font. For the first Oracle deployment, test one 15-second video, then 30/45/60-second renders and Cloudinary-to-Buffer publishing before routine use.
