@@ -11,6 +11,8 @@ import { classifyCloudflareImageError } from "./cloudflare-errors.js";
 import { buildBufferVideoPostInput, validatePublicVideoUrl, validateScheduledAt } from "./buffer-api.js";
 import { buildRenderedVideoFileName, getRenderedVideoExtension } from "./rendered-video.js";
 import { assertBufferPublishAllowed, recordBufferQueuePost, resetBufferApprovalIfContentChanged } from "./publishing-guard.js";
+import { renderJobWithFfmpeg } from "./cloud-renderer.js";
+import { createRenderQueue } from "./render-queue.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -70,6 +72,18 @@ function removeSavedRenderedVideo(job) {
   if (!job?.renderedVideoFile) return;
   fs.rmSync(path.join(OUTPUT_DIR, path.basename(job.renderedVideoFile)), { force: true });
 }
+
+const renderQueue = createRenderQueue({
+  readJobs,
+  writeJobs,
+  maxConcurrent: Math.max(1, Math.min(2, Number(process.env.RENDER_CONCURRENCY || 1))),
+  renderJob: (job, options) => renderJobWithFfmpeg(job, {
+    ...options,
+    outputsDir: OUTPUT_DIR,
+    dataDir: DATA_DIR,
+    ffmpegPath: process.env.FFMPEG_PATH || "ffmpeg"
+  })
+});
 
 function pcmToWav(pcm, sampleRate = 24000, channels = 1, bitsPerSample = 16) {
   const header = Buffer.alloc(44);
@@ -1386,6 +1400,41 @@ app.put("/api/jobs/:id/rendered-video", express.raw({ type: "video/*", limit: "2
   }
 });
 
+app.post("/api/jobs/:id/render", (req, res) => {
+  const job = readJobs().find(item => item.id === req.params.id);
+  if (!job) return res.status(404).json({ error: "Video brief not found." });
+  if (!job.scriptData?.scenes?.length) {
+    return res.status(400).json({ error: "पहले Hindi script और scene plan तैयार करें।" });
+  }
+  if (!job.voiceFile) {
+    return res.status(400).json({ error: "पहले Hindi voice generate करें।" });
+  }
+  try {
+    const queuedJob = renderQueue.enqueue(job.id);
+    return res.status(202).json({
+      ok: true,
+      message: "Server render queue में जोड़ दिया गया। आप page बंद कर सकते हैं; render server पर जारी रहेगा।",
+      job: queuedJob
+    });
+  } catch (error) {
+    return res.status(400).json({ error: error.message || "Render queue में job नहीं जोड़ पाए।" });
+  }
+});
+
+app.get("/api/jobs/:id/render-status", (req, res) => {
+  const job = readJobs().find(item => item.id === req.params.id);
+  if (!job) return res.status(404).json({ error: "Video brief not found." });
+  res.json({
+    ok: true,
+    renderStatus: job.renderStatus || "not_started",
+    renderProgress: Number(job.renderProgress || 0),
+    renderError: job.renderError || "",
+    renderedVideoFile: job.renderedVideoFile || "",
+    renderedSubtitleFile: job.renderedSubtitleFile || "",
+    renderDurationSec: job.renderDurationSec || null
+  });
+});
+
 app.post("/api/jobs/:id/generate-script", async (req, res) => {
   const { jobs, job } = findJob(req.params.id);
   if (!job) return res.status(404).json({ error: "Video brief not found." });
@@ -1999,6 +2048,9 @@ app.delete("/api/jobs/:id", (req, res) => {
   const jobs = readJobs();
   const index = jobs.findIndex(item => item.id === req.params.id);
   if (index === -1) return res.status(404).json({ error: "Video brief not found." });
+  if (["queued", "rendering"].includes(jobs[index].renderStatus)) {
+    return res.status(409).json({ error: "Rendering के दौरान यह video brief delete नहीं हो सकती। Render पूरा होने के बाद फिर कोशिश करें।" });
+  }
   const [deletedJob] = jobs.splice(index, 1);
   writeJobs(jobs);
   try {
@@ -2091,6 +2143,8 @@ app.patch("/api/jobs/:id", (req, res) => {
   writeJobs(jobs);
   res.json(job);
 });
+
+renderQueue.recover();
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log("Antardrishti Studio running on port " + PORT + " (local network enabled)");
