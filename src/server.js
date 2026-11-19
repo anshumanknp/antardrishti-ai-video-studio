@@ -13,6 +13,12 @@ import { buildRenderedVideoFileName, getRenderedVideoExtension } from "./rendere
 import { assertBufferPublishAllowed, recordBufferQueuePost, resetBufferApprovalIfContentChanged } from "./publishing-guard.js";
 import { renderJobWithFfmpeg } from "./cloud-renderer.js";
 import { createRenderQueue } from "./render-queue.js";
+import {
+  createAdminSessionToken,
+  isValidAdminPasswordHash,
+  verifyAdminPassword,
+  verifyAdminSessionToken
+} from "./admin-auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -58,12 +64,134 @@ const MALE_TTS_VOICES = new Set(["Orus", "Puck", "Charon", "Algieba", "Sadaltage
 const DEFAULT_FEMALE_VOICE = "Kore";
 const DEFAULT_MALE_VOICE = "Orus";
 
+const ADMIN_AUTH_ENABLED = process.env.ADMIN_AUTH_ENABLED === "true";
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "";
+const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH || "";
+const ADMIN_SESSION_SECRET = process.env.ADMIN_SESSION_SECRET || "";
+const ADMIN_SESSION_COOKIE = "antardrishti_admin_session";
+const ADMIN_SESSION_MAX_AGE_SECONDS = 12 * 60 * 60;
+const ADMIN_COOKIE_SECURE = process.env.ADMIN_COOKIE_SECURE === "true" || process.env.NODE_ENV === "production";
+if (ADMIN_AUTH_ENABLED && (
+  !ADMIN_USERNAME ||
+  !isValidAdminPasswordHash(ADMIN_PASSWORD_HASH) ||
+  ADMIN_SESSION_SECRET.length < 32
+)) {
+  throw new Error("Admin authentication enabled है, लेकिन ADMIN_USERNAME, valid ADMIN_PASSWORD_HASH या कम-से-कम 32 characters का ADMIN_SESSION_SECRET missing/invalid है।");
+}
+
+function getAdminSessionToken(req) {
+  const prefix = ADMIN_SESSION_COOKIE + "=";
+  const entry = String(req.headers.cookie || "").split(";").map(value => value.trim()).find(value => value.startsWith(prefix));
+  if (!entry) return "";
+  try { return decodeURIComponent(entry.slice(prefix.length)); }
+  catch { return ""; }
+}
+
+function hasAdminSession(req) {
+  if (!ADMIN_AUTH_ENABLED) return true;
+  return verifyAdminSessionToken(getAdminSessionToken(req), ADMIN_SESSION_SECRET);
+}
+
+function setAdminSessionCookie(res, token) {
+  const attributes = [
+    ADMIN_SESSION_COOKIE + "=" + encodeURIComponent(token),
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Strict",
+    "Max-Age=" + ADMIN_SESSION_MAX_AGE_SECONDS
+  ];
+  if (ADMIN_COOKIE_SECURE) attributes.push("Secure");
+  res.setHeader("Set-Cookie", attributes.join("; "));
+  res.setHeader("Cache-Control", "no-store");
+}
+
+function clearAdminSessionCookie(res) {
+  const attributes = [
+    ADMIN_SESSION_COOKIE + "=",
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Strict",
+    "Max-Age=0"
+  ];
+  if (ADMIN_COOKIE_SECURE) attributes.push("Secure");
+  res.setHeader("Set-Cookie", attributes.join("; "));
+  res.setHeader("Cache-Control", "no-store");
+}
+
+
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 if (!fs.existsSync(JOBS_FILE)) fs.writeFileSync(JOBS_FILE, "[]", "utf8");
 
 app.use(express.json({ limit: "3mb" }));
-app.use(express.static(path.join(__dirname, "..", "public")));
+
+app.get("/login.html", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.sendFile(path.join(__dirname, "..", "public", "login.html"));
+});
+
+app.get("/api/auth/status", (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json({
+    authEnabled: ADMIN_AUTH_ENABLED,
+    authenticated: hasAdminSession(req),
+    sessionExpiresInSeconds: hasAdminSession(req) && ADMIN_AUTH_ENABLED ? ADMIN_SESSION_MAX_AGE_SECONDS : null
+  });
+});
+
+const loginAttempts = new Map();
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_ATTEMPTS = 5;
+
+app.post("/api/auth/login", (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  if (!ADMIN_AUTH_ENABLED) return res.status(404).json({ error: "Admin login is not enabled on this server." });
+
+  const clientKey = req.ip || req.socket.remoteAddress || "unknown";
+  const now = Date.now();
+  const attempt = loginAttempts.get(clientKey);
+  if (attempt && now - attempt.windowStartedAt < LOGIN_WINDOW_MS && attempt.count >= LOGIN_MAX_ATTEMPTS) {
+    return res.status(429).json({ error: "बहुत बार गलत login हुआ है। 15 मिनट बाद फिर कोशिश करें।" });
+  }
+  if (attempt && now - attempt.windowStartedAt >= LOGIN_WINDOW_MS) loginAttempts.delete(clientKey);
+
+  const username = String(req.body?.username || "");
+  const password = String(req.body?.password || "");
+  const usernameMatches = username.length === ADMIN_USERNAME.length &&
+    Buffer.from(username).equals(Buffer.from(ADMIN_USERNAME));
+  const passwordMatches = verifyAdminPassword(password, ADMIN_PASSWORD_HASH);
+  if (!usernameMatches || !passwordMatches) {
+    const current = loginAttempts.get(clientKey);
+    if (!current || now - current.windowStartedAt >= LOGIN_WINDOW_MS) {
+      loginAttempts.set(clientKey, { windowStartedAt: now, count: 1 });
+    } else {
+      current.count++;
+    }
+    return res.status(401).json({ error: "Username या password सही नहीं है।" });
+  }
+
+  loginAttempts.delete(clientKey);
+  setAdminSessionCookie(res, createAdminSessionToken(ADMIN_SESSION_SECRET));
+  return res.json({ ok: true, authenticated: true });
+});
+
+app.post("/api/auth/logout", (_req, res) => {
+  clearAdminSessionCookie(res);
+  res.json({ ok: true });
+});
+
+app.use((req, res, next) => {
+  if (!ADMIN_AUTH_ENABLED) return next();
+  if (["/api/auth/status", "/api/auth/login", "/api/auth/logout"].includes(req.path)) return next();
+  if (hasAdminSession(req)) return next();
+  res.setHeader("Cache-Control", "no-store");
+  if (req.path.startsWith("/api/")) {
+    return res.status(401).json({ error: "AUTH_REQUIRED", authenticated: false });
+  }
+  return res.redirect(302, "/login.html");
+});
+
+app.use(express.static(path.join(__dirname, "..", "public"), { index: "index.html" }));
 app.use("/outputs", express.static(OUTPUT_DIR));
 
 function readJobs() { return readJobStore(JOBS_FILE); }
