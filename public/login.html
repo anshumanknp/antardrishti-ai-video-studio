@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111827">
+<title>Antardrishti · Admin Login</title>
+<style>
+:root{color-scheme:dark;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0b1220;color:#f4f0e8}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;min-height:100dvh;display:grid;place-items:center;padding:22px;background:radial-gradient(circle at 50% 0,#26364d 0,#111827 46%,#0b1220 100%)}
+main{width:min(100%,420px);padding:30px;border:1px solid #334155;border-radius:22px;background:rgba(17,24,39,.94);box-shadow:0 24px 70px rgba(0,0,0,.35)}
+.mark{width:52px;height:52px;border-radius:16px;display:grid;place-items:center;background:#e2bd78;color:#172033;font-weight:800;font-size:22px}
+h1{font-size:24px;margin:20px 0 6px}
+p{color:#aeb9c8;line-height:1.55;margin:0 0 24px}
+label{display:block;font-size:14px;margin:16px 0 7px;color:#d8e0eb}
+input{width:100%;font:inherit;font-size:16px;padding:14px 13px;border:1px solid #475569;border-radius:12px;background:#0f172a;color:#fff;outline:none}
+input:focus{border-color:#e2bd78;box-shadow:0 0 0 3px rgba(226,189,120,.14)}
+button{width:100%;margin-top:22px;border:0;border-radius:12px;padding:15px;background:#e2bd78;color:#172033;font-weight:750;font-size:16px}
+button:disabled{opacity:.55}
+#status{min-height:24px;margin:14px 0 0;color:#fca5a5;font-size:14px}
+small{display:block;margin-top:20px;color:#8290a3;line-height:1.5}
+</style>
+</head>
+<body>
+<main>
+<div class="mark">A</div>
+<h1>Antardrishti Studio</h1>
+<p>Sign in to your private video workspace.</p>
+<form id="loginForm">
+<label for="username">Admin username</label>
+<input id="username" name="username" autocomplete="username" required maxlength="80">
+<label for="password">Password</label>
+<input id="password" name="password" type="password" autocomplete="current-password" required maxlength="256">
+<button id="submit" type="submit">Sign in</button>
+<div id="status" role="status" aria-live="polite"></div>
+</form>
+<small>Private workspace. Do not share your login details.</small>
+</main>
+<script>
+const form = document.getElementById("loginForm");
+const button = document.getElementById("submit");
+const status = document.getElementById("status");
+fetch("/api/auth/status", { cache: "no-store" })
+  .then(response => response.json())
+  .then(result => { if (result.authenticated) location.replace("/"); })
+  .catch(() => { status.textContent = "Server से connect नहीं हो पाया।"; });
+form.addEventListener("submit", async event => {
+  event.preventDefault();
+  button.disabled = true;
+  button.textContent = "Signing in…";
+  status.textContent = "";
+  try {
+    const response = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: document.getElementById("username").value.trim(),
+        password: document.getElementById("password").value
+      }),
+      cache: "no-store"
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "Login failed.");
+    document.getElementById("password").value = "";
+    location.replace("/");
+  } catch (error) {
+    status.textContent = error.message || "Login नहीं हो पाया।";
+  } finally {
+    button.disabled = false;
+    button.textContent = "Sign in";
+  }
+});
+</script>
+</body>
+</html>
