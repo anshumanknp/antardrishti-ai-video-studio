@@ -31,7 +31,7 @@ A separate, local-first workspace for planning and tracking Antardrishti short-v
 4. Restart the local server with `npm start`.
 5. Add a video brief, then select **Open Studio** in the production queue.
 6. Generate the Hindi-first Devanagari script, review/edit it, choose a voice style, and generate the voice.
-7. Select **Create Slide Video** to make a vertical video in the browser. Download the video and the separate Hindi SRT subtitle file.
+7. Select **Render on Cloud Server** to submit the vertical video to the background render queue. The Oracle server creates the MP4 and Hindi SRT; you can leave the page while rendering continues.
 
 ### Voice options
 
@@ -63,13 +63,13 @@ Each generated scene now carries a production brief alongside its Hindi dialogue
 - **Transition:** the edit into the next scene, using a simple cut, dissolve or match cut.
 - **Audio cue:** a short music or sound-effect direction that stays behind the narration.
 
-The server validates these fields before accepting a generated script. The image prompt uses the requested shot type, and the browser renderer applies simulated push-in, pull-out, pan and tilt moves to generated stills. A dissolve/cross-fade is applied when that transition is requested; hard cuts remain immediate. These are still-image camera effects, not real camera footage or character movement. Audio cues remain production notes; this version does not generate a separate music or sound-effect track.
+The server validates these fields before accepting a generated script. The image prompt uses the requested shot type. The server-side FFmpeg renderer applies a gentle zoom to still images and cuts between generated shots. These are still-image camera effects, not real camera footage or character movement. Audio cues remain production notes; this version does not generate a separate music or sound-effect track. The cloud renderer requires FFmpeg and the Noto Devanagari font on the server.
 
 ### Video and subtitles
 
-The current video builder uses animated gradient title cards and generated scene artwork. It starts narration at the opening, overlays the uploaded logo, shows each scene's main subtitle and its sequential Hindi caption segments (2–3 segments per scene for 15-second videos; 3–4 for longer videos), and creates a scene-timed Hindi `.srt` file. Shot framing and supported camera moves affect the rendered image. Content, logo and progress indicator stay inside a central Reels-safe region; the video preview has an optional Instagram UI/safe-area guide. The guide is preview-only and is not exported. MP4 or WebM output depends on browser support. Caption segments are timed evenly within each scene, not word-level forced alignment.
+The server-side video builder uses animated dark title cards and generated scene artwork. It starts narration at the opening, overlays the uploaded logo, shows each scene's main subtitle and sequential Hindi caption segments, and creates a scene-timed Hindi SRT file. Scene images are cropped to vertical 9:16 and receive a gentle zoom. The video preview has an optional Instagram UI/safe-area guide; the guide is preview-only and is not exported. Caption segments are timed evenly within each scene, not word-level forced alignment.
 
-**Rendered-video persistence:** After the browser finishes rendering, the MP4/WebM file is uploaded to the local server and saved in the project's `outputs/` folder. Its filename is recorded on the video job. Reopening Script Studio after a page refresh or server restart restores the saved video preview and makes it available for Cloudinary/Buffer publishing without rendering again. If the server cannot save the file, the Studio warns you to download it before refreshing. Changing the script, voice or scene artwork invalidates the old render so it cannot be approved and published as if it matched the new content.
+**Rendered-video persistence:** The Oracle render worker creates an MP4 directly on the server and records its filename, size and duration on the video job. The job and queue state survive server restarts; interrupted renders are put back into the queue. Reopening Script Studio streams the saved MP4 from server storage. Cloudinary upload also runs from the server, so the phone does not need to download the full video Blob before Buffer publishing. Changing the script, voice or scene artwork invalidates the old render so it cannot be approved and published as if it matched the new content.
 
 The Studio uses a duration-based visual plan rather than generating a single image per scene. The current plan is 5 visual shots / 4 AI images for 15 seconds, 8 / 6 for 30 seconds, 10 / 8 for 45 seconds and 13 / 10 for 60 seconds. Extra visual shots reuse an existing scene image with a different crop and simulated camera move, so they do not trigger another image request. Only missing planned images are generated. The gallery also has a per-image regenerate action; it replaces only that selected image. The `@cf/black-forest-labs/flux-1-schnell` model creates square stills that the renderer crops to 9:16. Cloudflare's 10,000 AI Neurons/day Free allocation is shared across the account. The Studio applies a separate safety cap of 30 image requests per UTC day; this app cap is not a measurement of Cloudflare Neurons. There is no paid image-provider fallback. AI presenter footage and real generated cinematic video clips remain separate future integrations.
 
@@ -81,7 +81,7 @@ After Cloudflare is configured, open a video job and press **Auto Create Video (
 2. Save the reviewed script and the selected female, male or duet voice settings.
 3. Generate the Hindi narration audio through Gemini TTS.
 4. Generate missing scene images through Cloudflare Workers AI. Existing images are reused.
-5. Render the vertical video with the voice, scene images and Hindi subtitles, then prepare the separate SRT download.
+5. Submit the vertical video to the Oracle FFmpeg render queue. The server creates the MP4 and a separate Hindi SRT download.
 
 The script generator treats the selected 15/30/45/60-second length as a target and uses duration-specific narration word ranges and scene counts. After TTS, the Studio measures the actual voice duration. When a voice file exists, the renderer sets the final video length from the decoded narration duration (plus a short 0.15-second audio tail) and scales the intro, scene and outro timings to fit it. For example, a 13.8-second voice produces a video of about 14 seconds even when the selected target was 15 seconds; a slightly longer voice is also allowed to finish without being cut off. If no voice file exists, the renderer falls back to the selected duration. The automation still stops on an API or quota error and shows the failed step. It does not fall back to a paid provider. You still review the final video and decide when to publish it.
 
@@ -213,3 +213,71 @@ Avoid claims that hypnotherapy or past-life regression can diagnose, cure, or re
 ## Security
 
 Keep API keys in a local `.env` file or deployment secrets. Never commit credentials.
+
+
+## Cloud rendering and mobile access (Oracle VM)
+
+The dashboard can submit video rendering to the server. The render worker uses FFmpeg to create a 1080×1920 MP4 from the saved script, generated scene images, Hindi narration, subtitles and optional brand logo. The render queue is stored with the job records, runs one job at a time, and re-queues an interrupted render after a server restart. The mobile browser checks render status and streams the finished MP4 from the server; it does not keep the render running in the browser.
+
+### Oracle Ubuntu VM prerequisites
+
+Use a supported Node.js 20 or newer runtime. Install FFmpeg and the Noto Devanagari fonts:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ffmpeg fonts-noto-core
+ffmpeg -version
+```
+
+The default font path is `/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf`. Set `ANTARDRISHTI_FONT_PATH` if your Ubuntu image provides it elsewhere.
+
+### Persistent runtime directories
+
+Create persistent paths outside the Git checkout:
+
+```bash
+sudo install -d -o antardrishti -g antardrishti -m 750 /var/lib/antardrishti/data
+sudo install -d -o antardrishti -g antardrishti -m 750 /var/lib/antardrishti/outputs
+```
+
+Set these server environment values:
+
+```env
+ANTARDRISHTI_DATA_DIR=/var/lib/antardrishti/data
+ANTARDRISHTI_OUTPUT_DIR=/var/lib/antardrishti/outputs
+```
+
+The runtime data, jobs, brand settings, audio, scene images and rendered MP4s should stay on the persistent volume and must not be overwritten by a Git checkout update. Back up both directories regularly. A backup on the same VM is not an off-site backup; copy backups to a separate storage location and test restoring them before relying on them.
+
+### Required administrator login
+
+Do not expose this application to the public internet without administrator authentication and HTTPS. Production startup intentionally fails unless both `ADMIN_PASSWORD` and `ADMIN_SESSION_SECRET` are set.
+
+Generate a long session secret on the VM:
+
+```bash
+openssl rand -base64 48
+```
+
+Set the following values in a protected environment file (not in GitHub):
+
+```env
+NODE_ENV=production
+ADMIN_USERNAME=administrator
+ADMIN_PASSWORD=use-a-long-unique-password
+ADMIN_SESSION_SECRET=paste-the-generated-random-secret
+```
+
+Use a unique password of at least 12 characters and keep the environment file readable only by the service account. The login session cookie is HttpOnly, Secure in production and expires after 12 hours. Eight failed login attempts from the same client are temporarily rate-limited.
+
+### Mobile installation
+
+Open the deployed HTTPS address in Android Chrome, sign in, then use Chrome's menu → **Add to Home screen** (or **Install app**, when shown). The service worker does not cache private API responses, login sessions or video files. An internet connection is required for the dashboard and rendering.
+
+### Render API
+
+- `POST /api/jobs/:id/render` adds a video job to the background render queue.
+- `GET /api/jobs/:id/render-status` returns queued, rendering, ready or failed status and progress.
+- `POST /api/jobs/:id/host-video` uploads an approved server-rendered MP4 to the configured Cloudinary unsigned preset from the Oracle VM; the phone does not need to download the MP4 before Buffer publishing.
+
+The existing browser render upload endpoint remains for compatibility with older local workflows. The Oracle server render endpoint requires FFmpeg and a Hindi font. For the first Oracle deployment, test one 15-second video, then 30/45/60-second renders and Cloudinary-to-Buffer publishing before routine use.

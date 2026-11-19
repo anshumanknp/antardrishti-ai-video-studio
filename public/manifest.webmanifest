@@ -1,0 +1,21 @@
+{
+  "id": "/",
+  "name": "Antardrishti AI Video Studio",
+  "short_name": "Antardrishti",
+  "description": "Hindi-first AI video production workspace",
+  "lang": "hi-IN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d1421",
+  "theme_color": "#101827",
+  "icons": [
+    {
+      "src": "/antardrishti-mark.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

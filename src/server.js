@@ -2,7 +2,7 @@ import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHmac, timingSafeEqual } from "node:crypto";
 import { readJobs as readJobStore, writeJobs as writeJobStore } from "./job-store.js";
 import { getRecommendedSceneCount, preserveSceneProductionFields, validateScriptData } from "./script-validation.js";
 import { buildCloudflareScenePrompt } from "./image-prompt.js";
@@ -11,6 +11,8 @@ import { classifyCloudflareImageError } from "./cloudflare-errors.js";
 import { buildBufferVideoPostInput, validatePublicVideoUrl, validateScheduledAt } from "./buffer-api.js";
 import { buildRenderedVideoFileName, getRenderedVideoExtension } from "./rendered-video.js";
 import { assertBufferPublishAllowed, recordBufferQueuePost, resetBufferApprovalIfContentChanged } from "./publishing-guard.js";
+import { renderJobVideo } from "./render-engine.js";
+import { createRenderQueue } from "./render-queue.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -34,8 +36,125 @@ loadLocalEnv();
 
 const app = express();
 const PORT = Number(process.env.PORT || 3460);
-const DATA_DIR = path.join(__dirname, "..", "data");
-const OUTPUT_DIR = path.join(__dirname, "..", "outputs");
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "administrator";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
+const ADMIN_SESSION_SECRET = process.env.ADMIN_SESSION_SECRET || "";
+const AUTH_ENABLED = Boolean(ADMIN_PASSWORD && ADMIN_SESSION_SECRET);
+const SESSION_COOKIE = "antardrishti_session";
+const SESSION_MAX_AGE_SECONDS = 12 * 60 * 60;
+const LOGIN_ATTEMPTS = new Map();
+
+if (process.env.NODE_ENV === "production") {
+  if (!AUTH_ENABLED) throw new Error("Production launch blocked: set ADMIN_PASSWORD and ADMIN_SESSION_SECRET before starting Antardrishti.");
+  if (ADMIN_PASSWORD.length < 12) throw new Error("Production launch blocked: ADMIN_PASSWORD must contain at least 12 characters.");
+  if (ADMIN_SESSION_SECRET.length < 32) throw new Error("Production launch blocked: ADMIN_SESSION_SECRET must contain at least 32 characters.");
+}
+
+function safeTextEqual(left, right) {
+  const first = Buffer.from(String(left || ""));
+  const second = Buffer.from(String(right || ""));
+  return first.length === second.length && timingSafeEqual(first, second);
+}
+
+function sessionSignature(payload) {
+  return createHmac("sha256", ADMIN_SESSION_SECRET).update(payload).digest("base64url");
+}
+
+function createSessionToken(username) {
+  const payload = Buffer.from(JSON.stringify({
+    sub: username,
+    exp: Date.now() + SESSION_MAX_AGE_SECONDS * 1000
+  })).toString("base64url");
+  return payload + "." + sessionSignature(payload);
+}
+
+function getCookie(req, name) {
+  const header = String(req.headers.cookie || "");
+  for (const item of header.split(";")) {
+    const separator = item.indexOf("=");
+    if (separator < 0) continue;
+    if (item.slice(0, separator).trim() === name) {
+      try { return decodeURIComponent(item.slice(separator + 1).trim()); }
+      catch { return ""; }
+    }
+  }
+  return "";
+}
+
+function isAuthenticated(req) {
+  if (!AUTH_ENABLED) return true;
+  const token = getCookie(req, SESSION_COOKIE);
+  const separator = token.lastIndexOf(".");
+  if (separator <= 0) return false;
+  const payload = token.slice(0, separator);
+  const suppliedSignature = token.slice(separator + 1);
+  const expectedSignature = sessionSignature(payload);
+  if (!safeTextEqual(suppliedSignature, expectedSignature)) return false;
+  try {
+    const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return session.sub === ADMIN_USERNAME && Number(session.exp) > Date.now();
+  } catch {
+    return false;
+  }
+}
+
+function authCookie(token, maxAge = SESSION_MAX_AGE_SECONDS) {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  return SESSION_COOKIE + "=" + encodeURIComponent(token) +
+    "; HttpOnly; SameSite=Strict; Path=/; Max-Age=" + maxAge + secure;
+}
+
+const loginPublicPaths = new Set([
+  "/api/auth/login", "/api/auth/logout", "/api/auth/me", "/api/health",
+  "/login.html", "/manifest.webmanifest", "/service-worker.js", "/antardrishti-mark.svg"
+]);
+
+app.use(express.json({ limit: "3mb" }));
+
+app.post("/api/auth/login", (req, res) => {
+  if (!AUTH_ENABLED) return res.json({ ok: true, authEnabled: false });
+  const remoteKey = String(req.ip || "unknown");
+  const attempt = LOGIN_ATTEMPTS.get(remoteKey) || { count: 0, firstAt: Date.now(), lockedUntil: 0 };
+  if (attempt.lockedUntil > Date.now()) {
+    return res.status(429).json({ error: "बहुत बार गलत प्रयास हुए हैं। 15 मिनट बाद फिर कोशिश करें।" });
+  }
+  const username = String(req.body?.username || "");
+  const password = String(req.body?.password || "");
+  const valid = safeTextEqual(username, ADMIN_USERNAME) && safeTextEqual(password, ADMIN_PASSWORD);
+  if (!valid) {
+    if (Date.now() - attempt.firstAt > 15 * 60 * 1000) {
+      attempt.count = 0;
+      attempt.firstAt = Date.now();
+    }
+    attempt.count += 1;
+    if (attempt.count >= 8) attempt.lockedUntil = Date.now() + 15 * 60 * 1000;
+    LOGIN_ATTEMPTS.set(remoteKey, attempt);
+    return res.status(401).json({ error: "Username या password सही नहीं है।" });
+  }
+  LOGIN_ATTEMPTS.delete(remoteKey);
+  res.setHeader("Set-Cookie", authCookie(createSessionToken(ADMIN_USERNAME)));
+  res.json({ ok: true, authEnabled: true });
+});
+
+app.post("/api/auth/logout", (_req, res) => {
+  res.setHeader("Set-Cookie", authCookie("", 0));
+  res.json({ ok: true });
+});
+
+app.get("/api/auth/me", (req, res) => {
+  res.json({ ok: true, authEnabled: AUTH_ENABLED, authenticated: isAuthenticated(req) });
+});
+
+app.use((req, res, next) => {
+  if (!AUTH_ENABLED || loginPublicPaths.has(req.path) || isAuthenticated(req)) return next();
+  if (req.path.startsWith("/api/")) {
+    return res.status(401).json({ error: "Login required. Sign in to Antardrishti Studio." });
+  }
+  return res.redirect("/login.html");
+});
+
+const DATA_DIR = path.resolve(process.env.ANTARDRISHTI_DATA_DIR || path.join(__dirname, "..", "data"));
+const OUTPUT_DIR = path.resolve(process.env.ANTARDRISHTI_OUTPUT_DIR || path.join(__dirname, "..", "outputs"));
 const JOBS_FILE = path.join(DATA_DIR, "jobs.json");
 const BRAND_LOGO_META_FILE = path.join(DATA_DIR, "brand-logo.json");
 const GEMINI_TEXT_MODEL = "gemini-3.8-flash";
@@ -60,7 +179,6 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 if (!fs.existsSync(JOBS_FILE)) fs.writeFileSync(JOBS_FILE, "[]", "utf8");
 
-app.use(express.json({ limit: "3mb" }));
 app.use(express.static(path.join(__dirname, "..", "public")));
 app.use("/outputs", express.static(OUTPUT_DIR));
 
@@ -366,6 +484,15 @@ function findJob(id) {
   }
   return { jobs, job };
 }
+
+
+const renderQueue = createRenderQueue({
+  readJobs,
+  writeJobs,
+  renderVideo: renderJobVideo,
+  outputDir: OUTPUT_DIR,
+  dataDir: DATA_DIR
+});
 
 app.get("/api/health", (_req, res) => {
   const imageUsageToday = readImageUsage().count;
@@ -1350,6 +1477,81 @@ app.post("/api/jobs", (req, res) => {
   res.status(201).json(job);
 });
 
+app.post("/api/jobs/:id/render", (req, res) => {
+  try {
+    const job = renderQueue.enqueue(req.params.id);
+    res.status(202).json({ ok: true, job, render: renderQueue.getStatus(job.id) });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || "Server render queue में job नहीं जोड़ी जा सकी।" });
+  }
+});
+
+app.get("/api/jobs/:id/render-status", (req, res) => {
+  const render = renderQueue.getStatus(req.params.id);
+  if (!render) return res.status(404).json({ error: "Video brief not found." });
+  res.json({ ok: true, render });
+});
+
+app.post("/api/jobs/:id/host-video", async (req, res) => {
+  const { jobs, job } = findJob(req.params.id);
+  if (!job) return res.status(404).json({ error: "Video brief not found." });
+  if (!job.renderedVideoFile) return res.status(400).json({ error: "पहले server पर final video render करें।" });
+  if (job.status !== "approved") {
+    return res.status(403).json({ error: "Cloudinary upload से पहले final video review करके dashboard में Approved करें।" });
+  }
+  if (job.bufferVideoUrl) return res.json({ ok: true, videoUrl: job.bufferVideoUrl, job, alreadyUploaded: true });
+  if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
+    return res.status(503).json({ error: "Cloudinary configure नहीं है। Server environment में CLOUDINARY_CLOUD_NAME और CLOUDINARY_UPLOAD_PRESET सेट करें।" });
+  }
+
+  try {
+    const fileName = path.basename(job.renderedVideoFile);
+    const filePath = path.join(OUTPUT_DIR, fileName);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: "Rendered video file server पर नहीं मिली।" });
+    const stat = fs.statSync(filePath);
+    if (!stat.size || stat.size > 450 * 1024 * 1024) {
+      return res.status(413).json({ error: "Video file खाली है या 450 MB से बड़ी है।" });
+    }
+
+    const fileBuffer = await fs.promises.readFile(filePath);
+    const formData = new FormData();
+    formData.append("file", new Blob([fileBuffer], { type: "video/mp4" }), fileName);
+    formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
+    formData.append("folder", "antardrishti");
+
+    const endpoint = "https://api.cloudinary.com/v1_1/" +
+      encodeURIComponent(CLOUDINARY_CLOUD_NAME) + "/video/upload";
+    const response = await fetch(endpoint, {
+      method: "POST",
+      body: formData,
+      signal: AbortSignal.timeout(180000)
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = payload?.error?.message || "Cloudinary upload failed (HTTP " + response.status + ").";
+      return res.status(response.status === 413 ? 413 : 502).json({ error: String(message).slice(0, 500) });
+    }
+
+    const videoUrl = String(payload.secure_url || "");
+    if (!validatePublicVideoUrl(videoUrl)) {
+      return res.status(502).json({ error: "Cloudinary ने valid public HTTPS video URL नहीं लौटाया।" });
+    }
+
+    job.bufferVideoUrl = videoUrl;
+    job.bufferVideoUploadedAt = new Date().toISOString();
+    job.updatedAt = new Date().toISOString();
+    writeJobs(jobs);
+    res.json({ ok: true, videoUrl, job, bytesUploaded: stat.size });
+  } catch (error) {
+    const timedOut = error?.name === "TimeoutError" || error?.name === "AbortError";
+    res.status(timedOut ? 504 : 502).json({
+      error: timedOut
+        ? "Cloudinary upload में 3 minutes लग गए। Server log और Cloudinary status जाँचें।"
+        : error.message || "Cloudinary पर server से video upload नहीं हो पाई।"
+    });
+  }
+});
+
 app.put("/api/jobs/:id/rendered-video", express.raw({ type: "video/*", limit: "250mb" }), async (req, res) => {
   const { jobs, job } = findJob(req.params.id);
   if (!job) return res.status(404).json({ error: "Video brief not found." });
@@ -2094,4 +2296,5 @@ app.patch("/api/jobs/:id", (req, res) => {
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log("Antardrishti Studio running on port " + PORT + " (local network enabled)");
+  renderQueue.resume();
 });
