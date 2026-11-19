@@ -109,7 +109,7 @@ Each field can be edited and copied independently. Script regeneration or Devana
 
 ### Publishing Centre and Buffer sync
 
-Open **Publishing Centre** from the dashboard navigation. The separate page is read-only and retrieves Buffer posts for the connected organizations, including status, scheduled date, sent date, channel and publishing error message. It compares Buffer post IDs with Antardrishti's local queue records and shows failed or unverified Studio attempts separately.
+Open **Publishing Centre** from the dashboard navigation. It retrieves Buffer posts for the connected organizations, including status, scheduled date, sent date, channel and publishing error message. It compares Buffer post IDs with Antardrishti's local queue records and shows failed or unverified Studio attempts separately.
 
 Each new **Queue to Selected Channels** batch is saved locally before the Buffer requests start. The Studio records an individual outcome for every channel, including failures and successful Buffer Post IDs. The latest 100 queue batches per video job are retained in the local job record.
 
