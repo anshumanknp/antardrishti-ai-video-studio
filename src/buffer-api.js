@@ -1,5 +1,21 @@
 const SUPPORTED_SERVICES = new Set(["facebook", "instagram", "youtube"]);
 
+export function validateScheduledAt(scheduledAt, now = Date.now()) {
+  if (scheduledAt === undefined || scheduledAt === null || scheduledAt === "") return null;
+  const value = String(scheduledAt).trim();
+  if (!value || !/[Tt]/.test(value) || !/(?:Z|[+-]\\d{2}:\\d{2})$/i.test(value)) {
+    throw new Error("Choose a complete date and time with an explicit timezone.");
+  }
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) {
+    throw new Error("The selected publishing date and time is invalid.");
+  }
+  if (timestamp <= Number(now)) {
+    throw new Error("Choose a publishing date and time in the future.");
+  }
+  return new Date(timestamp).toISOString();
+}
+
 export function validatePublicVideoUrl(videoUrl) {
   let parsedUrl;
   try {
@@ -41,7 +57,8 @@ export function buildBufferVideoPostInput({
   channel,
   videoUrl,
   platformCopy,
-  isAiGenerated = true
+  isAiGenerated = true,
+  scheduledAt = null
 }) {
   if (!channel || typeof channel.id !== "string" || !channel.id.trim()) {
     throw new Error("A valid Buffer channel is required.");
@@ -56,13 +73,15 @@ export function buildBufferVideoPostInput({
 
   const copy = platformCopy && typeof platformCopy === "object" ? platformCopy : {};
   const assets = [{ video: { url: parsedUrl.toString() } }];
+  const normalizedSchedule = validateScheduledAt(scheduledAt);
   const input = {
     channelId: channel.id,
     schedulingType: "automatic",
-    mode: "addToQueue",
+    mode: normalizedSchedule ? "customScheduled" : "addToQueue",
     assets,
     aiAssisted: true
   };
+  if (normalizedSchedule) input.dueAt = normalizedSchedule;
 
   if (service === "facebook") {
     input.text = String(copy.facebookCaption || "").trim();
