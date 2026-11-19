@@ -1412,6 +1412,43 @@
     }
   }
 
+  function uploadCloudinaryVideo(uploadEndpoint, formData, onProgress) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", uploadEndpoint);
+      xhr.timeout = 180000;
+      xhr.upload.addEventListener("progress", event => {
+        if (event.lengthComputable && typeof onProgress === "function") {
+          onProgress(Math.round((event.loaded / event.total) * 100));
+        }
+      });
+      xhr.addEventListener("load", () => {
+        let payload = {};
+        try { payload = JSON.parse(xhr.responseText || "{}"); }
+        catch {
+          reject(new Error("Cloudinary ने readable response नहीं दिया।"));
+          return;
+        }
+        if (xhr.status < 200 || xhr.status >= 300) {
+          reject(new Error(payload.error?.message || "Cloudinary upload नहीं हो पाया। Upload preset और file-size limit जाँचें।"));
+          return;
+        }
+        resolve(payload);
+      });
+      xhr.addEventListener("error", () => {
+        reject(new Error("Cloudinary से connection नहीं बना। Internet और Upload Preset जाँचें।"));
+      });
+      xhr.addEventListener("timeout", () => {
+        reject(new Error("Cloudinary upload में 3 minutes लग गए। Video size, internet और Upload Preset जाँचें।"));
+      });
+      xhr.addEventListener("abort", () => {
+        reject(new Error("Cloudinary upload रोक दिया गया।"));
+      });
+      if (typeof onProgress === "function") onProgress(0);
+      xhr.send(formData);
+    });
+  }
+
   async function getHostedBufferVideoUrl() {
     if (activeJob?.bufferVideoUrl && !currentVideoNeedsUpload) return activeJob.bufferVideoUrl;
     if (!currentVideoBlob || currentVideoJobId !== activeJobId) {
@@ -1433,23 +1470,13 @@
 
     const uploadEndpoint = "https://api.cloudinary.com/v1_1/" +
       encodeURIComponent(cloudinaryConfig.cloudName) + "/video/upload";
-    let uploadResponse;
-    try {
-      uploadResponse = await fetch(uploadEndpoint, {
-        method: "POST",
-        body: formData,
-        signal: AbortSignal.timeout(180000)
-      });
-    } catch (error) {
-      if (error?.name === "TimeoutError" || error?.name === "AbortError") {
-        throw new Error("Cloudinary upload में 3 minutes लग गए और request रोक दी गई। Video size, internet और Upload Preset जाँचें।");
-      }
-      throw new Error("Cloudinary से connection नहीं बना: " + String(error?.message || "Network error").slice(0, 180));
-    }
-    const uploadResult = await uploadResponse.json().catch(() => ({}));
-    if (!uploadResponse.ok) {
-      throw new Error(uploadResult.error?.message || "Cloudinary upload नहीं हो पाया। Upload preset और file-size limit जाँचें।");
-    }
+    const uploadResult = await uploadCloudinaryVideo(uploadEndpoint, formData, percent => {
+      const resultHost = document.getElementById("bufferResult");
+      resultHost.classList.remove("error");
+      resultHost.textContent = percent >= 100
+        ? "Cloudinary upload पूरा हुआ। Video URL save हो रहा है…"
+        : "Cloudinary पर video upload हो रहा है: " + percent + "%";
+    });
 
     let videoUrl = uploadResult.secure_url || "";
     if (mimeType.startsWith("video/webm")) {
@@ -1503,11 +1530,14 @@
     button.disabled = true;
     resultHost.classList.remove("error");
     try {
-      resultHost.textContent = "Final video Cloudinary पर upload हो रहा है…";
-      button.textContent = "Uploading video…";
+      const alreadyHosted = Boolean(activeJob?.bufferVideoUrl && !currentVideoNeedsUpload);
+      resultHost.textContent = alreadyHosted
+        ? "Cloudinary पर video पहले से मौजूद है। Buffer channels जाँचे जा रहे हैं…"
+        : "Cloudinary पर video upload शुरू हो रहा है…";
+      button.textContent = alreadyHosted ? "Checking Buffer…" : "Uploading video…";
       const videoUrl = await getHostedBufferVideoUrl();
 
-      resultHost.textContent = "एक ही video selected Buffer channels पर भेजी जा रही है…";
+      resultHost.textContent = channelIds.length + " selected channel(s) पर Buffer queue request भेजी जा रही है…";
       button.textContent = "Queueing " + channelIds.length + " channel(s)…";
       const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/buffer/queue-all", {
         method: "POST",
