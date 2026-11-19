@@ -6,6 +6,10 @@ function contentFingerprint(job) {
     duration: job.duration,
     scriptData: job.scriptData,
     voiceFile: job.voiceFile,
+    voiceDurationSec: job.voiceDurationSec,
+    voiceMode: job.voiceMode,
+    femaleVoice: job.femaleVoice,
+    maleVoice: job.maleVoice,
     sceneImages: job.sceneImages
   });
 }
