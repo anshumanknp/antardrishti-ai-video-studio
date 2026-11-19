@@ -15,6 +15,19 @@ a{color:inherit;text-decoration:none}.wrap{max-width:1480px;margin:auto;padding:
 .notice{display:none;border:1px solid #6d5530;background:#30291d;color:#f1d7a4;padding:11px 14px;border-radius:10px;margin:14px 0;font-size:13px}.notice.show{display:block}.error{border-color:#77434a;background:#321e27;color:#ffc2c2}
 .filters{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;gap:10px;margin:14px 0 18px}.filters input,.filters select{width:100%;background:#0d1928;border:1px solid var(--line);border-radius:9px;padding:10px 11px;color:var(--text);min-height:40px}
 .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:11px}table{width:100%;border-collapse:collapse;min-width:960px}th,td{text-align:left;padding:12px 13px;border-bottom:1px solid rgba(63,84,110,.55);vertical-align:top}th{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#b2c1d2;background:#17283d;position:sticky;top:0}td{font-size:13px}tbody tr:hover{background:rgba(255,255,255,.025)}.date{white-space:nowrap;font-variant-numeric:tabular-nums}.muted{color:var(--muted)}.platform{font-weight:750}.channel{font-size:12px;color:var(--muted);margin-top:3px}.content{max-width:360px;white-space:normal;overflow-wrap:anywhere}.status{display:inline-block;border-radius:999px;padding:4px 9px;font-size:11px;font-weight:750;text-transform:capitalize;white-space:nowrap;background:#344457;color:#d5e0ea}.scheduled{background:#173d34;color:#90e6c4}.sent,.matched{background:#183851;color:#9bd0ff}.error,.failed,.not_found{background:#48272d;color:#ffb6bc}.pending,.processing{background:#4a3922;color:#f2d28c}.tag{display:inline-block;border:1px solid var(--line);border-radius:6px;padding:2px 6px;color:var(--muted);font-size:10px;margin-top:5px}.link{color:var(--blue);font-weight:650}.empty{padding:28px;text-align:center;color:var(--muted)}.footer{padding:12px 2px;color:var(--muted);font-size:12px}
+.calendar-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.calendar-nav{display:flex;align-items:center;gap:8px}.calendar-nav strong{min-width:150px;text-align:center}
+.calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:7px}
+.calendar-weekday{padding:5px 7px;color:var(--muted);font-size:11px;font-weight:700;text-align:center}
+.calendar-day{min-height:94px;padding:7px;text-align:left;vertical-align:top;border:1px solid var(--line);border-radius:9px;background:#0d1928;color:var(--text);cursor:pointer;min-width:0}
+.calendar-day:hover,.calendar-day.selected{border-color:var(--gold);background:#1b2b40}
+.calendar-day.outside{opacity:.38}.calendar-day.today{box-shadow:inset 0 0 0 1px #7fb9ef}
+.calendar-day-number{font-weight:750;font-size:12px}.calendar-day-count{display:block;color:var(--muted);font-size:10px;margin:3px 0}
+.calendar-chip{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:3px;padding:2px 4px;border-radius:4px;font-size:9px;background:#344457;color:#d5e0ea}
+.calendar-chip.scheduled{background:#173d34;color:#90e6c4}.calendar-chip.sent{background:#183851;color:#9bd0ff}.calendar-chip.error,.calendar-chip.failed,.calendar-chip.not_found{background:#48272d;color:#ffb6bc}
+.row-actions{display:flex;gap:6px;flex-wrap:wrap;min-width:128px}
+.row-action{border:1px solid var(--line);border-radius:6px;padding:5px 7px;background:#1b3049;color:var(--text);font-size:11px;cursor:pointer}
+.row-action.cancel{border-color:#74444a;color:#ffb6bc}.row-action:disabled{opacity:.5;cursor:wait}
 @media(max-width:1050px){.cards{grid-template-columns:repeat(3,1fr)}.filters{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:650px){.wrap{padding:15px}.heading{display:block}h1{font-size:28px}.cards{grid-template-columns:repeat(2,1fr)}.filters{grid-template-columns:1fr 1fr}.filters input:first-child{grid-column:span 2}.top{align-items:flex-start;flex-direction:column}}
 </style>
@@ -49,7 +62,24 @@ a{color:inherit;text-decoration:none}.wrap{max-width:1480px;margin:auto;padding:
     <article class="card"><div class="num" id="unverifiedCount">—</div><div class="label">Not found / failed attempts</div></article>
   </section>
 
-  <section class="panel">
+  <section class="panel" aria-labelledby="calendarTitle">
+    <div class="calendar-toolbar">
+      <div>
+        <h2 id="calendarTitle">Publishing Calendar</h2>
+        <p class="help" style="margin:4px 0 0">Buffer से sync हुए posts और Studio attempts तारीख के हिसाब से देखें। किसी तारीख पर click करके नीचे records filter करें।</p>
+      </div>
+      <div class="calendar-nav">
+        <button class="btn" id="previousMonthBtn" type="button" aria-label="Previous month">←</button>
+        <strong id="calendarMonthLabel">—</strong>
+        <button class="btn" id="nextMonthBtn" type="button" aria-label="Next month">→</button>
+        <button class="btn" id="currentMonthBtn" type="button">Today</button>
+      </div>
+    </div>
+    <div class="calendar-grid" id="calendarGrid" aria-live="polite"></div>
+    <div class="footer" id="calendarSummary">Buffer sync के बाद calendar में publishing dates दिखेंगी।</div>
+  </section>
+
+  <section class="panel" id="recordsPanel">
     <h2>Publishing records</h2>
     <p class="help">समय हर Buffer channel की configured timezone में दिखेगा। Buffer post status वास्तविक API record से आता है। Studio की पुरानी submission history अलग से दिखाई जाएगी।</p>
     <div class="filters">
@@ -70,12 +100,12 @@ a{color:inherit;text-decoration:none}.wrap{max-width:1480px;margin:auto;padding:
     <div class="table-wrap">
       <table>
         <thead><tr>
-          <th>Scheduled / activity date</th><th>Platform & channel</th><th>Video / post content</th><th>Status</th><th>Buffer Post ID</th><th>Details</th>
+          <th>Scheduled / activity date</th><th>Platform & channel</th><th>Video / post content</th><th>Status</th><th>Buffer Post ID</th><th>Details</th><th>Actions</th>
         </tr></thead>
-        <tbody id="recordsBody"><tr><td colspan="6" class="empty">Sync with Buffer दबाकर वास्तविक records लाएँ।</td></tr></tbody>
+        <tbody id="recordsBody"><tr><td colspan="7" class="empty">Sync with Buffer दबाकर वास्तविक records लाएँ।</td></tr></tbody>
       </table>
     </div>
-    <div class="footer" id="resultFooter">यह page केवल Buffer records पढ़ता है। यहाँ से कोई post create, edit या delete नहीं होगी।</div>
+    <div class="footer" id="resultFooter">Sync Buffer records को पढ़ता है। Scheduled post के Reschedule और Cancel actions सीधे Buffer में बदलाव करते हैं।</div>
   </section>
 
   <section class="panel">
@@ -88,7 +118,7 @@ a{color:inherit;text-decoration:none}.wrap{max-width:1480px;margin:auto;padding:
       </table>
     </div>
   </section>
-  <div class="footer">Antardrishti Publishing Centre · Buffer sync is read-only · Recent two-year history window, subject to Buffer retention and API pagination limits.</div>
+  <div class="footer">Antardrishti Publishing Centre · Sync is read-only; Reschedule and Cancel update eligible Scheduled posts in Buffer · Recent two-year history window, subject to Buffer retention and API pagination limits.</div>
 </div>
 
 <script>
@@ -98,6 +128,9 @@ a{color:inherit;text-decoration:none}.wrap{max-width:1480px;margin:auto;padding:
   var allRows=[];
   var channelNames={};
   var channelTimezones={};
+  var calendarViewDate=new Date();
+  calendarViewDate.setDate(1);
+  var selectedCalendarDate="";
   var syncBtn=document.getElementById("syncBtn");
   var notice=document.getElementById("notice");
 
@@ -132,7 +165,7 @@ a{color:inherit;text-decoration:none}.wrap{max-width:1480px;margin:auto;padding:
   }
   function statusLabel(status){
     var value=String(status||"unknown").toLowerCase();
-    var labels={scheduled:"Scheduled",sent:"Published",error:"Error",not_found:"Not found in Buffer",failed:"Submission failed",pending:"Pending verification",processing:"Processing"};
+    var labels={scheduled:"Scheduled",sent:"Published",error:"Error",not_found:"Not found in Buffer",failed:"Submission failed",pending:"Pending verification",processing:"Processing",cancelled:"Cancelled"};
     return labels[value]||value.replace(/_/g," ");
   }
   function statusBadge(status){
@@ -162,6 +195,7 @@ a{color:inherit;text-decoration:none}.wrap{max-width:1480px;margin:auto;padding:
         externalLink:post.externalLink,
         topic:post.topic,
         isStudioTracked:post.isStudioTracked,
+        channelTimezone:channelTimezones[post.channelId]||"Asia/Kolkata",
         batchId:post.batchId
       });
       if(post.id)seenAttemptIds[String(post.id)]=true;
@@ -169,6 +203,7 @@ a{color:inherit;text-decoration:none}.wrap{max-width:1480px;margin:auto;padding:
     (data.attempts||[]).forEach(function(attempt){
       if(attempt.postId&&seenAttemptIds[String(attempt.postId)])return;
       var state=attempt.verificationStatus==="not_found"?"not_found":
+        attempt.verificationStatus==="cancelled"?"cancelled":
         attempt.verificationStatus==="pending"?"pending":
         attempt.verificationStatus==="submission_failed"?"failed":"unknown";
       rows.push({
@@ -184,6 +219,7 @@ a{color:inherit;text-decoration:none}.wrap{max-width:1480px;margin:auto;padding:
         postId:attempt.postId,
         error:attempt.error||attempt.bufferError||(state==="not_found"?"Buffer returned no matching post in the synced history window.":""),
         topic:attempt.topic,
+        channelTimezone:channelTimezones[attempt.channelId]||"Asia/Kolkata",
         batchId:attempt.batchId
       });
     });
@@ -242,7 +278,7 @@ a{color:inherit;text-decoration:none}.wrap{max-width:1480px;margin:auto;padding:
     });
     var body=document.getElementById("recordsBody");
     if(!filtered.length){
-      body.innerHTML='<tr><td colspan="6" class="empty">इन filters में कोई record नहीं मिला।</td></tr>';
+      body.innerHTML='<tr><td colspan="7" class="empty">इन filters में कोई record नहीं मिला।</td></tr>';
     }else{
       body.innerHTML=filtered.map(function(row){
         var content=escapeHtml(shortText(row.topic||row.text,180));
@@ -250,6 +286,9 @@ a{color:inherit;text-decoration:none}.wrap{max-width:1480px;margin:auto;padding:
           row.externalLink?'<a class="link" href="'+escapeHtml(row.externalLink)+'" target="_blank" rel="noopener">Open published post ↗</a>':
           row.isStudioTracked?'<span class="muted">Antardrishti Studio submission</span>':'<span class="muted">Buffer record</span>';
         var source='<span class="tag">'+(row.isStudioTracked?"Studio tracked":"Buffer record")+'</span>';
+        var actions=row.rowType==="buffer"&&row.status==="scheduled"&&row.postId
+          ? '<div class="row-actions"><button class="row-action" type="button" data-post-action="reschedule" data-post-id="'+escapeHtml(row.postId)+'" data-timezone="'+escapeHtml(channelTimezones[row.channelId]||"Asia/Kolkata")+'">Reschedule</button><button class="row-action cancel" type="button" data-post-action="cancel" data-post-id="'+escapeHtml(row.postId)+'">Cancel</button></div>'
+          : '<span class="muted">—</span>';
         return '<tr>'+
           '<td class="date">'+escapeHtml(formatDate(row.activityAt,row.channelId))+'</td>'+
           '<td><div class="platform">'+escapeHtml(String(row.platform||"").toUpperCase())+'</div><div class="channel">'+escapeHtml(row.channelName||"Channel name unavailable")+'</div></td>'+
@@ -257,10 +296,11 @@ a{color:inherit;text-decoration:none}.wrap{max-width:1480px;margin:auto;padding:
           '<td>'+statusBadge(row.status)+'</td>'+
           '<td><span class="muted">'+escapeHtml(row.postId||"—")+'</span></td>'+
           '<td>'+details+'</td>'+
+          '<td>'+actions+'</td>'+
           '</tr>';
       }).join("");
     }
-    document.getElementById("resultFooter").textContent="Showing "+filtered.length+" of "+allRows.length+" records. No post was created, changed or deleted during sync.";
+    document.getElementById("resultFooter").textContent="Showing "+filtered.length+" of "+allRows.length+" records. Use actions only for posts still Scheduled in Buffer.";
   }
   function renderAttempts(data){
     var body=document.getElementById("attemptsBody");
@@ -273,6 +313,7 @@ a{color:inherit;text-decoration:none}.wrap{max-width:1480px;margin:auto;padding:
       return new Date(b.batchCreatedAt||0).getTime()-new Date(a.batchCreatedAt||0).getTime();
     }).map(function(item){
       var verification=item.verificationStatus==="matched"?"Matched in Buffer":
+        item.verificationStatus==="cancelled"?"Cancelled in Buffer":
         item.verificationStatus==="not_found"?"Not in sync results":
         item.verificationStatus==="pending"?"Pending":
         "No Buffer Post ID";
@@ -287,6 +328,108 @@ a{color:inherit;text-decoration:none}.wrap{max-width:1480px;margin:auto;padding:
         '</tr>';
     }).join("");
   }
+  function dateTimeLocalForZone(value, timeZone){
+    var parts=getTimeZoneParts(new Date(value),timeZone);
+    return parts.year+"-"+parts.month+"-"+parts.day+"T"+parts.hour+":"+parts.minute;
+  }
+  function getTimeZoneParts(date,timeZone){
+    var zone=timeZone||"Asia/Kolkata";
+    var parts;
+    try{
+      parts=new Intl.DateTimeFormat("en-CA",{timeZone:zone,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(date);
+    }catch(_){
+      parts=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(date);
+    }
+    var values={};
+    parts.forEach(function(part){if(part.type!=="literal")values[part.type]=part.value;});
+    return values;
+  }
+  function localDateTimeToUtc(value,timeZone){
+    var match=/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(String(value||""));
+    if(!match)throw new Error("पूरी date और time चुनें (YYYY-MM-DD HH:mm).");
+    var year=Number(match[1]),month=Number(match[2]),day=Number(match[3]),hour=Number(match[4]),minute=Number(match[5]);
+    var target=Date.UTC(year,month-1,day,hour,minute),guess=target;
+    for(var i=0;i<5;i++){
+      var local=getTimeZoneParts(new Date(guess),timeZone);
+      var represented=Date.UTC(Number(local.year),Number(local.month)-1,Number(local.day),Number(local.hour),Number(local.minute));
+      guess+=target-represented;
+    }
+    var confirmed=getTimeZoneParts(new Date(guess),timeZone);
+    if(Number(confirmed.year)!==year||Number(confirmed.month)!==month||Number(confirmed.day)!==day||Number(confirmed.hour)!==hour||Number(confirmed.minute)!==minute){
+      throw new Error("इस channel timezone में यह local time मौजूद नहीं है। दूसरा समय चुनें।");
+    }
+    if(guess<=Date.now()+60000)throw new Error("नई publishing time कम-से-कम एक मिनट भविष्य में चुनें।");
+    return new Date(guess).toISOString();
+  }
+  function renderCalendar(){
+    var grid=document.getElementById("calendarGrid");
+    if(!grid)return;
+    var year=calendarViewDate.getFullYear(),month=calendarViewDate.getMonth();
+    var monthLabel=new Intl.DateTimeFormat("en-IN",{month:"long",year:"numeric"}).format(calendarViewDate);
+    document.getElementById("calendarMonthLabel").textContent=monthLabel;
+    var weekdays=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+    var html=weekdays.map(function(day){return '<div class="calendar-weekday">'+day+'</div>';}).join("");
+    var offset=(new Date(year,month,1).getDay()+6)%7;
+    var dayCount=new Date(year,month+1,0).getDate();
+    var cellCount=Math.ceil((offset+dayCount)/7)*7;
+    var monthKey=year+"-"+String(month+1).padStart(2,"0");
+    var monthRows=allRows.filter(function(row){return localDateKey(row.activityAt,row.channelId).slice(0,7)===monthKey;});
+    var todayKey=localDateKey(new Date().toISOString(),null);
+    for(var cell=0;cell<cellCount;cell++){
+      var dayNumber=cell-offset+1;
+      var date=new Date(year,month,dayNumber);
+      var key=year+"-"+String(month+1).padStart(2,"0")+"-"+String(dayNumber).padStart(2,"0");
+      var inside=dayNumber>=1&&dayNumber<=dayCount;
+      var entries=inside?monthRows.filter(function(row){return localDateKey(row.activityAt,row.channelId)===key;}):[];
+      var chips=entries.slice(0,2).map(function(row){
+        var name=String(row.platform||"post").toUpperCase();
+        return '<span class="calendar-chip '+escapeHtml(row.status)+'">'+escapeHtml(name+' · '+statusLabel(row.status))+'</span>';
+      }).join("");
+      if(entries.length>2)chips+='<span class="calendar-chip">+'+(entries.length-2)+' more</span>';
+      html+='<button type="button" class="calendar-day'+(inside?"":" outside")+(key===todayKey?" today":"")+(key===selectedCalendarDate?" selected":"")+'" data-calendar-date="'+(inside?key:"")+'" '+(inside?'aria-label="'+key+', '+entries.length+' publishing records"':'disabled')+'>'+
+        '<span class="calendar-day-number">'+(inside?dayNumber:"")+'</span>'+
+        (entries.length?'<span class="calendar-day-count">'+entries.length+' post(s)</span>':'')+chips+'</button>';
+    }
+    grid.innerHTML=html;
+    document.getElementById("calendarSummary").textContent=monthRows.length+" publishing record(s) in "+monthLabel+". Click a date to filter the records below.";
+  }
+  async function handlePostAction(event){
+    var button=event.target.closest("[data-post-action]");
+    if(!button)return;
+    var action=button.dataset.postAction,postId=button.dataset.postId;
+    if(!postId)return;
+    var endpoint="/api/buffer/posts/"+encodeURIComponent(postId);
+    var options={method:"DELETE"};
+    if(action==="reschedule"){
+      var timezone=button.dataset.timezone||"Asia/Kolkata";
+      var current=allRows.find(function(row){return row.postId===postId;});
+      var initial=current&&current.activityAt?dateTimeLocalForZone(current.activityAt,timezone):"";
+      var entered=window.prompt("नई तारीख और समय दर्ज करें (YYYY-MM-DDTHH:mm), "+timezone+" के अनुसार:",initial);
+      if(entered===null)return;
+      var dueAt;
+      try{dueAt=localDateTimeToUtc(entered.trim(),timezone);}
+      catch(error){showNotice(error.message||"Date/time सही नहीं है।",true);return;}
+      if(!window.confirm("इस scheduled post को "+entered+" ("+timezone+") पर reschedule करें?"))return;
+      endpoint+="/reschedule";
+      options={method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({dueAt:dueAt})};
+    }else if(action==="cancel"){
+      if(!window.confirm("क्या इस scheduled post को Buffer से cancel/delete करना है? यह action वापस नहीं होगा।"))return;
+    }else{return;}
+    button.disabled=true;
+    button.textContent=action==="cancel"?"Cancelling…":"Saving…";
+    try{
+      var response=await fetch(endpoint,options);
+      var result=await response.json().catch(function(){return {};});
+      if(!response.ok)throw new Error(result.error||"Buffer post update failed.");
+      showNotice(action==="cancel"?"Scheduled post Buffer से cancel कर दी गई।":"Post की नई publishing date और time save हो गई।",false);
+      await sync();
+    }catch(error){
+      showNotice(error.message||"Buffer post update नहीं हो पाई।",true);
+      button.disabled=false;
+      button.textContent=action==="cancel"?"Cancel":"Reschedule";
+    }
+  }
+
   async function sync(){
     syncBtn.disabled=true;
     syncBtn.textContent="Syncing Buffer…";
@@ -303,6 +446,7 @@ a{color:inherit;text-decoration:none}.wrap{max-width:1480px;margin:auto;padding:
       renderChannelFilter(result);
       allRows=buildRows(result);
       renderRows();
+      renderCalendar();
       renderAttempts(result);
     }catch(error){
       showNotice(error.message||"Buffer sync पूरा नहीं हो पाया। PowerShell में [buffer-tracker] log देखें।",true);
@@ -314,7 +458,30 @@ a{color:inherit;text-decoration:none}.wrap{max-width:1480px;margin:auto;padding:
   ["searchBox","channelFilter","statusFilter","fromDate","toDate"].forEach(function(id){
     document.getElementById(id).addEventListener(id==="searchBox"?"input":"change",renderRows);
   });
+  document.getElementById("previousMonthBtn").addEventListener("click",function(){
+    calendarViewDate=new Date(calendarViewDate.getFullYear(),calendarViewDate.getMonth()-1,1);
+    renderCalendar();
+  });
+  document.getElementById("nextMonthBtn").addEventListener("click",function(){
+    calendarViewDate=new Date(calendarViewDate.getFullYear(),calendarViewDate.getMonth()+1,1);
+    renderCalendar();
+  });
+  document.getElementById("currentMonthBtn").addEventListener("click",function(){
+    calendarViewDate=new Date();calendarViewDate.setDate(1);renderCalendar();
+  });
+  document.getElementById("calendarGrid").addEventListener("click",function(event){
+    var button=event.target.closest("[data-calendar-date]");
+    var day=button&&button.dataset.calendarDate;
+    if(!day)return;
+    selectedCalendarDate=day;
+    document.getElementById("fromDate").value=day;
+    document.getElementById("toDate").value=day;
+    renderRows();renderCalendar();
+    document.getElementById("recordsPanel").scrollIntoView({behavior:"smooth",block:"start"});
+  });
+  document.getElementById("recordsBody").addEventListener("click",handlePostAction);
   syncBtn.addEventListener("click",sync);
+  renderCalendar();
   sync();
 })();
 </script>
