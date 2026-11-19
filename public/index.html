@@ -288,6 +288,7 @@
         <span class="connection"><span class="dot"></span>Local workspace</span>
         <a class="secondary-btn" href="/publishing.html">Publishing Centre</a>
         <a class="primary-btn" href="#create">＋ New video brief</a>
+        <button class="secondary-btn" id="logoutBtn" type="button">Sign out</button>
       </div>
     </header>
 
@@ -2232,6 +2233,18 @@
   });
 </script>
   <script>
+    const logoutButton = document.getElementById("logoutBtn");
+    fetch("/api/auth/me", { credentials: "same-origin" }).then(response => response.json()).then(result => {
+      logoutButton.hidden = !result.authEnabled;
+    }).catch(() => { logoutButton.hidden = true; });
+    logoutButton.addEventListener("click", async () => {
+      logoutButton.disabled = true;
+      try {
+        await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
+      } finally {
+        window.location.replace("/login.html");
+      }
+    });
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
         navigator.serviceWorker.register("/service-worker.js").catch(() => {});
