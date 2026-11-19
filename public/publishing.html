@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Antardrishti · Publishing Centre</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1421;--panel:#142235;--panel2:#1a2b41;--line:#2a3d55;--text:#edf2f7;--muted:#9aacc0;--gold:#d8b77a;--green:#56c69a;--red:#ef7777;--blue:#7fb9ef;--yellow:#e8bd70}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(135deg,#0a1421,#101e30 55%,#0c1726);color:var(--text);font:15px/1.5 Inter,Segoe UI,Arial,sans-serif}
+a{color:inherit;text-decoration:none}.wrap{max-width:1480px;margin:auto;padding:24px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:28px}.brand{font-size:13px;letter-spacing:.13em;color:var(--gold);font-weight:700}.toplinks{display:flex;gap:10px;flex-wrap:wrap}.btn{border:1px solid var(--line);border-radius:10px;padding:10px 15px;background:#1b3049;color:var(--text);font-weight:650;cursor:pointer}.btn.primary{background:var(--gold);color:#182232;border-color:var(--gold)}.btn:disabled{opacity:.55;cursor:wait}
+.heading{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;margin-bottom:22px}.eyebrow{font-size:11px;letter-spacing:.16em;color:var(--gold);text-transform:uppercase;font-weight:700}h1{font-size:34px;line-height:1.15;margin:6px 0 8px}.sub{color:var(--muted);max-width:800px;margin:0}.sync-info{color:var(--muted);font-size:12px;margin-top:8px}
+.cards{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;margin:22px 0}.card{background:linear-gradient(160deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:14px;padding:16px;min-height:96px}.card .num{font-size:30px;line-height:1.1;font-weight:750;margin-bottom:7px;font-variant-numeric:tabular-nums}.card .label{font-size:12px;color:var(--muted)}
+.panel{background:rgba(20,34,53,.92);border:1px solid var(--line);border-radius:16px;padding:18px;margin:16px 0}.panel h2{margin:0 0 5px;font-size:18px}.help{font-size:12px;color:var(--muted);margin:0 0 15px}
+.notice{display:none;border:1px solid #6d5530;background:#30291d;color:#f1d7a4;padding:11px 14px;border-radius:10px;margin:14px 0;font-size:13px}.notice.show{display:block}.error{border-color:#77434a;background:#321e27;color:#ffc2c2}
+.filters{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;gap:10px;margin:14px 0 18px}.filters input,.filters select{width:100%;background:#0d1928;border:1px solid var(--line);border-radius:9px;padding:10px 11px;color:var(--text);min-height:40px}
+.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:11px}table{width:100%;border-collapse:collapse;min-width:960px}th,td{text-align:left;padding:12px 13px;border-bottom:1px solid rgba(63,84,110,.55);vertical-align:top}th{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#b2c1d2;background:#17283d;position:sticky;top:0}td{font-size:13px}tbody tr:hover{background:rgba(255,255,255,.025)}.date{white-space:nowrap;font-variant-numeric:tabular-nums}.muted{color:var(--muted)}.platform{font-weight:750}.channel{font-size:12px;color:var(--muted);margin-top:3px}.content{max-width:360px;white-space:normal;overflow-wrap:anywhere}.status{display:inline-block;border-radius:999px;padding:4px 9px;font-size:11px;font-weight:750;text-transform:capitalize;white-space:nowrap;background:#344457;color:#d5e0ea}.scheduled{background:#173d34;color:#90e6c4}.sent,.matched{background:#183851;color:#9bd0ff}.error,.failed,.not_found{background:#48272d;color:#ffb6bc}.pending,.processing{background:#4a3922;color:#f2d28c}.tag{display:inline-block;border:1px solid var(--line);border-radius:6px;padding:2px 6px;color:var(--muted);font-size:10px;margin-top:5px}.link{color:var(--blue);font-weight:650}.empty{padding:28px;text-align:center;color:var(--muted)}.footer{padding:12px 2px;color:var(--muted);font-size:12px}
+@media(max-width:1050px){.cards{grid-template-columns:repeat(3,1fr)}.filters{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:650px){.wrap{padding:15px}.heading{display:block}h1{font-size:28px}.cards{grid-template-columns:repeat(2,1fr)}.filters{grid-template-columns:1fr 1fr}.filters input:first-child{grid-column:span 2}.top{align-items:flex-start;flex-direction:column}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">ANTARDRISHTI AI VIDEO STUDIO</div>
+    <nav class="toplinks">
+      <a class="btn" href="/">← Dashboard</a>
+      <button class="btn primary" id="syncBtn" type="button">↻ Sync with Buffer</button>
+    </nav>
+  </header>
+
+  <section class="heading">
+    <div>
+      <div class="eyebrow">Publishing operations</div>
+      <h1>Publishing Centre</h1>
+      <p class="sub">Antardrishti से भेजी गई हर post का Buffer record, schedule और publishing status एक जगह देखें। Buffer से आई posts और Studio की submissions का मिलान यहाँ होगा।</p>
+      <div class="sync-info" id="syncInfo">अभी Buffer sync नहीं हुआ है।</div>
+    </div>
+  </section>
+
+  <div class="notice" id="notice"></div>
+
+  <section class="cards">
+    <article class="card"><div class="num" id="totalPosts">—</div><div class="label">Buffer में मिले posts</div></article>
+    <article class="card"><div class="num" id="scheduledCount">—</div><div class="label">Scheduled in Buffer</div></article>
+    <article class="card"><div class="num" id="sentCount">—</div><div class="label">Published / Sent</div></article>
+    <article class="card"><div class="num" id="errorCount">—</div><div class="label">Buffer publishing errors</div></article>
+    <article class="card"><div class="num" id="confirmedCount">—</div><div class="label">Studio posts matched</div></article>
+    <article class="card"><div class="num" id="unverifiedCount">—</div><div class="label">Not found / failed attempts</div></article>
+  </section>
+
+  <section class="panel">
+    <h2>Publishing records</h2>
+    <p class="help">समय हर Buffer channel की configured timezone में दिखेगा। Buffer post status वास्तविक API record से आता है। Studio की पुरानी submission history अलग से दिखाई जाएगी।</p>
+    <div class="filters">
+      <input id="searchBox" type="search" placeholder="Video, caption, channel या Post ID खोजें">
+      <select id="channelFilter"><option value="">All channels</option></select>
+      <select id="statusFilter">
+        <option value="">All statuses</option>
+        <option value="scheduled">Scheduled</option>
+        <option value="sent">Sent</option>
+        <option value="error">Error</option>
+        <option value="not_found">Not found in sync</option>
+        <option value="failed">Submission failed</option>
+        <option value="pending">Pending verification</option>
+      </select>
+      <input id="fromDate" type="date" aria-label="From date">
+      <input id="toDate" type="date" aria-label="To date">
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Scheduled / activity date</th><th>Platform & channel</th><th>Video / post content</th><th>Status</th><th>Buffer Post ID</th><th>Details</th>
+        </tr></thead>
+        <tbody id="recordsBody"><tr><td colspan="6" class="empty">Sync with Buffer दबाकर वास्तविक records लाएँ।</td></tr></tbody>
+      </table>
+    </div>
+    <div class="footer" id="resultFooter">यह page केवल Buffer records पढ़ता है। यहाँ से कोई post create, edit या delete नहीं होगी।</div>
+  </section>
+
+  <section class="panel">
+    <h2>Studio submission attempts</h2>
+    <p class="help">हर Queue action और selected channel का result यहाँ रखा जाएगा। इससे यह पता चलेगा कि post Buffer ने स्वीकार की थी, reject की थी, या उसका status verify नहीं हुआ।</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Batch date</th><th>Video</th><th>Platform / channel</th><th>Submission</th><th>Buffer Post ID</th><th>Error / verification</th></tr></thead>
+        <tbody id="attemptsBody"><tr><td colspan="6" class="empty">अभी local submission records load नहीं हुए हैं।</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+  <div class="footer">Antardrishti Publishing Centre · Buffer sync is read-only · Recent two-year history window, subject to Buffer retention and API pagination limits.</div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var snapshot=null;
+  var allRows=[];
+  var channelNames={};
+  var channelTimezones={};
+  var syncBtn=document.getElementById("syncBtn");
+  var notice=document.getElementById("notice");
+
+  function escapeHtml(value){
+    return String(value==null?"":value).replace(/[&<>"']/g,function(char){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char];
+    });
+  }
+  function localDateKey(value,channelId){
+    if(!value)return "";
+    var date=new Date(value);
+    if(Number.isNaN(date.getTime()))return "";
+    var timezone=channelTimezones[channelId]||"Asia/Kolkata";
+    try{
+      var parts=new Intl.DateTimeFormat("en-CA",{timeZone:timezone,year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(date);
+      var values={};
+      parts.forEach(function(part){if(part.type!=="literal")values[part.type]=part.value;});
+      return values.year+"-"+values.month+"-"+values.day;
+    }catch(_){return date.toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});}
+  }
+  function formatDate(value,channelId){
+    if(!value)return "Date not set";
+    var date=new Date(value);
+    if(Number.isNaN(date.getTime()))return "Date unavailable";
+    var timezone=channelTimezones[channelId]||"Asia/Kolkata";
+    try{return date.toLocaleString("en-IN",{timeZone:timezone,dateStyle:"medium",timeStyle:"short"});}
+    catch(_){return date.toLocaleString("en-IN",{timeZone:"Asia/Kolkata",dateStyle:"medium",timeStyle:"short"});}
+  }
+  function shortText(value,max){
+    var text=String(value||"").replace(/\s+/g," ").trim();
+    return text.length>(max||160)?text.slice(0,max||160)+"…":text;
+  }
+  function statusLabel(status){
+    var value=String(status||"unknown").toLowerCase();
+    var labels={scheduled:"Scheduled",sent:"Published",error:"Error",not_found:"Not found in Buffer",failed:"Submission failed",pending:"Pending verification",processing:"Processing"};
+    return labels[value]||value.replace(/_/g," ");
+  }
+  function statusBadge(status){
+    var value=String(status||"unknown").toLowerCase();
+    return '<span class="status '+escapeHtml(value)+'">'+escapeHtml(statusLabel(value))+'</span>';
+  }
+  function activityDate(row){
+    return row.dueAt||row.sentAt||row.createdAt||row.batchCreatedAt||row.submittedAt||row.failedAt||"";
+  }
+  function buildRows(data){
+    var rows=[];
+    var seenAttemptIds={};
+    (data.posts||[]).forEach(function(post){
+      rows.push({
+        rowType:"buffer",
+        activityAt:post.dueAt||post.sentAt||post.createdAt,
+        dueAt:post.dueAt,
+        sentAt:post.sentAt,
+        createdAt:post.createdAt,
+        channelId:post.channelId,
+        channelName:post.channelName,
+        platform:post.channelService,
+        text:post.text,
+        status:String(post.status||"unknown").toLowerCase(),
+        postId:post.id,
+        error:post.error&&post.error.message,
+        externalLink:post.externalLink,
+        topic:post.topic,
+        isStudioTracked:post.isStudioTracked,
+        batchId:post.batchId
+      });
+      if(post.id)seenAttemptIds[String(post.id)]=true;
+    });
+    (data.attempts||[]).forEach(function(attempt){
+      if(attempt.postId&&seenAttemptIds[String(attempt.postId)])return;
+      var state=attempt.verificationStatus==="not_found"?"not_found":
+        attempt.verificationStatus==="pending"?"pending":
+        attempt.verificationStatus==="submission_failed"?"failed":"unknown";
+      rows.push({
+        rowType:"attempt",
+        activityAt:attempt.dueAt||attempt.submittedAt||attempt.failedAt||attempt.batchCreatedAt,
+        dueAt:attempt.dueAt,
+        createdAt:attempt.batchCreatedAt,
+        channelId:attempt.channelId,
+        channelName:attempt.channelName,
+        platform:attempt.platform,
+        text:attempt.topic||"Studio submission",
+        status:state,
+        postId:attempt.postId,
+        error:attempt.error||attempt.bufferError||(state==="not_found"?"Buffer returned no matching post in the synced history window.":""),
+        topic:attempt.topic,
+        batchId:attempt.batchId
+      });
+    });
+    return rows.sort(function(a,b){
+      return new Date(b.activityAt||0).getTime()-new Date(a.activityAt||0).getTime();
+    });
+  }
+  function renderSummary(data){
+    var summary=data.summary||{};
+    document.getElementById("totalPosts").textContent=Number(data.postCount||0);
+    document.getElementById("scheduledCount").textContent=Number(summary.scheduled||0);
+    document.getElementById("sentCount").textContent=Number(summary.sent||0);
+    document.getElementById("errorCount").textContent=Number(summary.error||0);
+    document.getElementById("confirmedCount").textContent=Number(summary.confirmedInBuffer||0);
+    document.getElementById("unverifiedCount").textContent=Number(summary.notFoundInBuffer||0)+Number(summary.submissionFailed||0)+Number(summary.pendingVerification||0);
+    var date=new Date(data.syncedAt);
+    document.getElementById("syncInfo").textContent="Last sync: "+(Number.isNaN(date.getTime())?"unknown":date.toLocaleString("en-IN"))+
+      " · "+Number(data.postCount||0)+" Buffer posts · "+Number(data.pageCount||0)+" API page(s)";
+    var noticeText=data.hasMore?"Buffer history में 1,000 से अधिक records हैं। इस sync में पहले 1,000 records दिखाए गए हैं; शेष के लिए date/channel-scoped sync की जरूरत होगी.":"Buffer के available recent records sync हो गए हैं।";
+    showNotice(noticeText,data.hasMore);
+  }
+  function renderChannelFilter(data){
+    var select=document.getElementById("channelFilter");
+    var old=select.value;
+    var seen={};
+    var list=[];
+    (data.channels||[]).forEach(function(channel){
+      if(!channel.id||seen[channel.id])return;
+      seen[channel.id]=true;
+      list.push(channel);
+    });
+    select.innerHTML='<option value="">All channels</option>'+list.map(function(channel){
+      return '<option value="'+escapeHtml(channel.id)+'">'+escapeHtml(String(channel.service||"").toUpperCase()+" · "+channel.name)+'</option>';
+    }).join("");
+    if(list.some(function(channel){return channel.id===old;}))select.value=old;
+  }
+  function showNotice(message,isError){
+    notice.textContent=message;
+    notice.className="notice show"+(isError?" error":"");
+  }
+  function renderRows(){
+    var search=document.getElementById("searchBox").value.trim().toLowerCase();
+    var channel=document.getElementById("channelFilter").value;
+    var status=document.getElementById("statusFilter").value;
+    var from=document.getElementById("fromDate").value;
+    var to=document.getElementById("toDate").value;
+    var filtered=allRows.filter(function(row){
+      var blob=[row.topic,row.text,row.platform,row.channelName,row.postId,row.error].join(" ").toLowerCase();
+      if(search&&!blob.includes(search))return false;
+      if(channel&&String(row.channelId)!==channel)return false;
+      if(status&&String(row.status)!==status)return false;
+      var day=localDateKey(row.activityAt,row.channelId);
+      if(from&&day&&day<from)return false;
+      if(to&&day&&day>to)return false;
+      return true;
+    });
+    var body=document.getElementById("recordsBody");
+    if(!filtered.length){
+      body.innerHTML='<tr><td colspan="6" class="empty">इन filters में कोई record नहीं मिला।</td></tr>';
+    }else{
+      body.innerHTML=filtered.map(function(row){
+        var content=escapeHtml(shortText(row.topic||row.text,180));
+        var details=row.error?'<span class="muted">'+escapeHtml(shortText(row.error,220))+'</span>':
+          row.externalLink?'<a class="link" href="'+escapeHtml(row.externalLink)+'" target="_blank" rel="noopener">Open published post ↗</a>':
+          row.isStudioTracked?'<span class="muted">Antardrishti Studio submission</span>':'<span class="muted">Buffer record</span>';
+        var source='<span class="tag">'+(row.isStudioTracked?"Studio tracked":"Buffer record")+'</span>';
+        return '<tr>'+
+          '<td class="date">'+escapeHtml(formatDate(row.activityAt,row.channelId))+'</td>'+
+          '<td><div class="platform">'+escapeHtml(String(row.platform||"").toUpperCase())+'</div><div class="channel">'+escapeHtml(row.channelName||"Channel name unavailable")+'</div></td>'+
+          '<td class="content">'+content+source+'</td>'+
+          '<td>'+statusBadge(row.status)+'</td>'+
+          '<td><span class="muted">'+escapeHtml(row.postId||"—")+'</span></td>'+
+          '<td>'+details+'</td>'+
+          '</tr>';
+      }).join("");
+    }
+    document.getElementById("resultFooter").textContent="Showing "+filtered.length+" of "+allRows.length+" records. No post was created, changed or deleted during sync.";
+  }
+  function renderAttempts(data){
+    var body=document.getElementById("attemptsBody");
+    var attempts=data.attempts||[];
+    if(!attempts.length){
+      body.innerHTML='<tr><td colspan="6" class="empty">अभी कोई queue attempt record नहीं है। आगे से हर selected channel की success/failure यहाँ save होगी।</td></tr>';
+      return;
+    }
+    body.innerHTML=attempts.slice().sort(function(a,b){
+      return new Date(b.batchCreatedAt||0).getTime()-new Date(a.batchCreatedAt||0).getTime();
+    }).map(function(item){
+      var verification=item.verificationStatus==="matched"?"Matched in Buffer":
+        item.verificationStatus==="not_found"?"Not in sync results":
+        item.verificationStatus==="pending"?"Pending":
+        "No Buffer Post ID";
+      var detail=item.bufferError||item.error||verification;
+      return '<tr>'+
+        '<td class="date">'+escapeHtml(formatDate(item.batchCreatedAt||item.submittedAt||item.failedAt))+'</td>'+
+        '<td>'+escapeHtml(item.topic||"—")+'<div class="tag">'+escapeHtml(item.batchId||"legacy record")+'</div></td>'+
+        '<td><div class="platform">'+escapeHtml(String(item.platform||"").toUpperCase())+'</div><div class="channel">'+escapeHtml(item.channelName||item.channelId||"Channel")+'</div></td>'+
+        '<td>'+statusBadge(item.attemptStatus||item.batchStatus||"legacy")+'</td>'+
+        '<td><span class="muted">'+escapeHtml(item.postId||"—")+'</span></td>'+
+        '<td><span class="muted">'+escapeHtml(shortText(detail,250))+'</span></td>'+
+        '</tr>';
+    }).join("");
+  }
+  async function sync(){
+    syncBtn.disabled=true;
+    syncBtn.textContent="Syncing Buffer…";
+    showNotice("Buffer से posts, dates और statuses पढ़े जा रहे हैं। यह read-only sync है।",false);
+    try{
+      var response=await fetch("/api/buffer/publishing-tracker",{signal:AbortSignal.timeout(180000),cache:"no-store"});
+      var result=await response.json();
+      if(!response.ok)throw new Error(result.error||"Buffer sync failed.");
+      snapshot=result;
+      channelNames={};
+      channelTimezones={};
+      (result.channels||[]).forEach(function(channel){channelNames[channel.id]=channel.name;channelTimezones[channel.id]=channel.timezone||"Asia/Kolkata";});
+      renderSummary(result);
+      renderChannelFilter(result);
+      allRows=buildRows(result);
+      renderRows();
+      renderAttempts(result);
+    }catch(error){
+      showNotice(error.message||"Buffer sync पूरा नहीं हो पाया। PowerShell में [buffer-tracker] log देखें।",true);
+    }finally{
+      syncBtn.disabled=false;
+      syncBtn.textContent="↻ Sync with Buffer";
+    }
+  }
+  ["searchBox","channelFilter","statusFilter","fromDate","toDate"].forEach(function(id){
+    document.getElementById(id).addEventListener(id==="searchBox"?"input":"change",renderRows);
+  });
+  syncBtn.addEventListener("click",sync);
+  sync();
+})();
+</script>
+</body>
+</html>

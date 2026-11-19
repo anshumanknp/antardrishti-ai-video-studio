@@ -106,6 +106,16 @@ Each field can be edited and copied independently. Script regeneration or Devana
 8. Generate the Social Media Content Pack. It contains separate Facebook and Instagram captions, a YouTube Shorts title and SEO description, hashtags, and 8–12 YouTube SEO keyword suggestions. Review the copy and approve the final video in the dashboard.
 9. Select **Queue to Selected Channels**. The Studio uploads the rendered video to Cloudinary automatically the first time, saves its permanent HTTPS URL to the job, and creates a separate Buffer queue post for each selected channel. No manual video URL or repeated upload is needed.
 
+### Publishing Centre and Buffer sync
+
+Open **Publishing Centre** from the dashboard navigation. The separate page is read-only and retrieves Buffer posts for the connected organizations, including status, scheduled date, sent date, channel and publishing error message. It compares Buffer post IDs with Antardrishti's local queue records and shows failed or unverified Studio attempts separately.
+
+Each new **Queue to Selected Channels** batch is saved locally before the Buffer requests start. The Studio records an individual outcome for every channel, including failures and successful Buffer Post IDs. The latest 100 queue batches per video job are retained in the local job record.
+
+The tracker sync reads up to 20 pages of 50 posts per organization, covering a two-year history window. Buffer keeps sent and failed posts for two years; older sent or failed posts may no longer be available from its API. If the page cap is reached, the tracker warns that the returned list is incomplete. Scheduled dates are displayed using the Buffer channel's configured timezone.
+
+The sync is read-only: it does not create, edit or delete Buffer posts. A local post ID that is not returned in the sync is labelled **Not found in sync**, not automatically treated as deleted; verify its Buffer ID and history window before retrying to avoid duplicates.
+
 ### One-time Cloudinary setup for automatic video hosting
 
 Buffer's API does not accept a local MP4 upload. The Studio therefore uploads the rendered video to Cloudinary before creating Buffer posts.

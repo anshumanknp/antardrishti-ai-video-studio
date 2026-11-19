@@ -440,7 +440,7 @@ async function fetchBufferOrganizationsAndChannels() {
   const organizations = Array.isArray(account.organizations) ? account.organizations : [];
   const results = await Promise.all(organizations.map(async organization => {
     const query = "query BufferChannels { channels(input: { organizationId: " +
-      JSON.stringify(organization.id) + " }) { id name service } }";
+      JSON.stringify(organization.id) + " }) { id name service timezone isDisconnected isQueuePaused } }";
     const data = await callBufferApi(query);
     return {
       id: organization.id,
@@ -451,6 +451,225 @@ async function fetchBufferOrganizationsAndChannels() {
 
   return { account: { id: account.id }, organizations: results };
 }
+async function fetchBufferPostsForOrganization(organization, channelIds, startDate) {
+  const query = `query PublishingTrackerPosts($first: Int!, $after: String, $input: PostsInput!) {
+    posts(first: $first, after: $after, input: $input) {
+      edges {
+        node {
+          id
+          text
+          status
+          dueAt
+          createdAt
+          updatedAt
+          sentAt
+          channelId
+          channelService
+          externalLink
+          error { message supportUrl }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }`;
+
+  const posts = [];
+  let after = null;
+  let pageCount = 0;
+  let hasNextPage = true;
+  const maxPages = 20;
+
+  while (hasNextPage && pageCount < maxPages) {
+    const variables = {
+      first: 50,
+      input: {
+        organizationId: organization.id,
+        filter: { startDate, channelIds },
+        sort: [
+          { field: "dueAt", direction: "desc" },
+          { field: "createdAt", direction: "desc" }
+        ]
+      }
+    };
+    if (after) variables.after = after;
+
+    const data = await callBufferApi(query, variables);
+    const connection = data.posts;
+    if (!connection || !Array.isArray(connection.edges)) {
+      throw new Error("Buffer posts query ने expected list नहीं लौटाई।");
+    }
+    for (const edge of connection.edges) {
+      if (edge?.node?.id) {
+        posts.push({ ...edge.node, organizationId: organization.id, organizationName: organization.name });
+      }
+    }
+
+    pageCount += 1;
+    hasNextPage = Boolean(connection.pageInfo?.hasNextPage);
+    after = connection.pageInfo?.endCursor || null;
+    if (hasNextPage && !after) {
+      throw new Error("Buffer pagination cursor नहीं मिला; incomplete sync को successful नहीं दिखाया जाएगा।");
+    }
+  }
+
+  return { posts, pageCount, hasMore: hasNextPage };
+}
+
+function buildPublishingTrackerSnapshot(jobs, bufferPosts, channels, syncInfo) {
+  const postsById = new Map(bufferPosts.map(post => [String(post.id), post]));
+  const channelById = new Map(channels.map(channel => [String(channel.id), channel]));
+  const attempts = [];
+  const trackedPostIds = new Map();
+
+  for (const job of jobs) {
+    const batches = Array.isArray(job.bufferQueueBatches) ? job.bufferQueueBatches : [];
+    for (const batch of batches) {
+      for (const item of Array.isArray(batch.items) ? batch.items : []) {
+        const attempt = {
+          ...item,
+          batchId: batch.batchId,
+          batchCreatedAt: batch.createdAt,
+          batchStatus: batch.status,
+          jobId: job.id,
+          topic: job.topic,
+          videoStatus: job.status
+        };
+        if (item.postId) trackedPostIds.set(String(item.postId), attempt);
+        attempts.push(attempt);
+      }
+    }
+
+    const legacy = Array.isArray(job.bufferQueuedPosts) ? job.bufferQueuedPosts : [];
+    for (const item of legacy) {
+      if (item.postId && trackedPostIds.has(String(item.postId))) continue;
+      const attempt = {
+        ...item,
+        batchId: item.batchId || null,
+        batchCreatedAt: item.queuedAt || null,
+        batchStatus: "legacy",
+        attemptStatus: "submitted",
+        jobId: job.id,
+        topic: job.topic,
+        videoStatus: job.status
+      };
+      if (item.postId) trackedPostIds.set(String(item.postId), attempt);
+      attempts.push(attempt);
+    }
+  }
+
+  const enrichedAttempts = attempts.map(attempt => {
+    const bufferPost = attempt.postId ? postsById.get(String(attempt.postId)) : null;
+    const channel = channelById.get(String(attempt.channelId));
+    let verificationStatus = "submission_failed";
+    if (attempt.postId) verificationStatus = bufferPost ? "matched" : "not_found";
+    else if (["pending", "processing"].includes(String(attempt.attemptStatus || attempt.status || ""))) {
+      verificationStatus = "pending";
+    }
+    return {
+      ...attempt,
+      channelName: attempt.channelName || channel?.name || "",
+      platform: attempt.platform || channel?.service || "",
+      verificationStatus,
+      bufferStatus: bufferPost?.status || null,
+      dueAt: bufferPost?.dueAt || attempt.dueAt || null,
+      sentAt: bufferPost?.sentAt || null,
+      bufferError: bufferPost?.error?.message || null,
+      externalLink: bufferPost?.externalLink || null
+    };
+  });
+
+  const enrichedPosts = bufferPosts.map(post => {
+    const tracked = trackedPostIds.get(String(post.id));
+    const channel = channelById.get(String(post.channelId));
+    return {
+      ...post,
+      channelName: channel?.name || "",
+      isStudioTracked: Boolean(tracked),
+      jobId: tracked?.jobId || null,
+      topic: tracked?.topic || null,
+      batchId: tracked?.batchId || null
+    };
+  });
+
+  const statusCounts = { scheduled: 0, sent: 0, error: 0, other: 0 };
+  for (const post of bufferPosts) {
+    const status = String(post.status || "").toLowerCase();
+    if (status === "scheduled") statusCounts.scheduled += 1;
+    else if (status === "sent") statusCounts.sent += 1;
+    else if (status === "error") statusCounts.error += 1;
+    else statusCounts.other += 1;
+  }
+
+  return {
+    ok: true,
+    syncedAt: syncInfo.syncedAt,
+    historyWindowDays: syncInfo.historyWindowDays,
+    pageCount: syncInfo.pageCount,
+    postCount: enrichedPosts.length,
+    hasMore: syncInfo.hasMore,
+    channels,
+    summary: {
+      studioAttempts: enrichedAttempts.length,
+      confirmedInBuffer: enrichedAttempts.filter(item => item.verificationStatus === "matched").length,
+      submissionFailed: enrichedAttempts.filter(item => item.verificationStatus === "submission_failed").length,
+      notFoundInBuffer: enrichedAttempts.filter(item => item.verificationStatus === "not_found").length,
+      pendingVerification: enrichedAttempts.filter(item => item.verificationStatus === "pending").length,
+      ...statusCounts
+    },
+    attempts: enrichedAttempts,
+    posts: enrichedPosts
+  };
+}
+
+
+app.get("/api/buffer/publishing-tracker", async (_req, res) => {
+  if (!BUFFER_API_KEY) {
+    return res.status(503).json({ error: "BUFFER_API_KEY local .env में configure नहीं है।" });
+  }
+
+  const startedAt = Date.now();
+  const historyWindowDays = 730;
+  const startDate = new Date(Date.now() - historyWindowDays * 24 * 60 * 60 * 1000).toISOString();
+
+  try {
+    const bufferData = await fetchBufferOrganizationsAndChannels();
+    const channels = bufferData.organizations.flatMap(organization =>
+      (organization.channels || []).map(channel => ({
+        ...channel,
+        organizationId: organization.id,
+        organizationName: organization.name
+      }))
+    );
+    const organizationResults = await Promise.all(bufferData.organizations.map(organization =>
+      fetchBufferPostsForOrganization(
+        organization,
+        (organization.channels || []).map(channel => channel.id),
+        startDate
+      )
+    ));
+    const bufferPosts = organizationResults.flatMap(result => result.posts);
+    const pageCount = organizationResults.reduce((total, result) => total + result.pageCount, 0);
+    const hasMore = organizationResults.some(result => result.hasMore);
+    const jobs = readJobs();
+    const snapshot = buildPublishingTrackerSnapshot(jobs, bufferPosts, channels, {
+      syncedAt: new Date().toISOString(),
+      historyWindowDays,
+      pageCount,
+      hasMore
+    });
+
+    console.info("[buffer-tracker] synced posts=" + bufferPosts.length +
+      " attempts=" + snapshot.attempts.length + " pages=" + pageCount +
+      " in " + (Date.now() - startedAt) + "ms");
+    return res.json(snapshot);
+  } catch (error) {
+    console.error("[buffer-tracker] failed after " + (Date.now() - startedAt) +
+      "ms: " + (error.message || "Unknown sync error"));
+    return res.status(error.status || 502).json({
+      error: error.message || "Buffer publishing records sync नहीं हो पाए।"
+    });
+  }
+});
 
 app.get("/api/buffer/status", async (_req, res) => {
   if (!BUFFER_API_KEY) {
@@ -688,6 +907,32 @@ app.post("/api/jobs/:id/buffer/queue-all", async (req, res) => {
     return res.status(409).json({ error: "तीनों platforms की saved social copy और YouTube SEO pack पहले generate करके review करें।" });
   }
 
+  const queueBatch = {
+    batchId: randomUUID(),
+    createdAt: new Date().toISOString(),
+    completedAt: null,
+    status: "processing",
+    jobId: job.id,
+    topic: job.topic,
+    requestedChannelIds: channelIds,
+    items: channelIds.map(channelId => ({
+      channelId,
+      channelName: "",
+      platform: "",
+      attemptStatus: "pending",
+      postId: null,
+      dueAt: null,
+      bufferStatus: null,
+      error: null
+    }))
+  };
+  if (!Array.isArray(job.bufferQueueBatches)) job.bufferQueueBatches = [];
+  job.bufferQueueBatches.push(queueBatch);
+  if (job.bufferQueueBatches.length > 100) {
+    job.bufferQueueBatches.splice(0, job.bufferQueueBatches.length - 100);
+  }
+  writeJobs(jobs);
+
   const queueStartedAt = Date.now();
   console.info("[buffer-queue-all] started job=" + job.id + " selectedChannels=" + channelIds.length);
   try {
@@ -698,10 +943,28 @@ app.post("/api/jobs/:id/buffer/queue-all", async (req, res) => {
     const failures = [];
     for (const channelId of channelIds) {
       const channel = availableChannels.find(item => item.id === channelId);
-      if (!channel) failures.push({ channelId, error: "यह Buffer channel connected account में नहीं मिला।" });
-      else if (!["facebook", "instagram", "youtube"].includes(String(channel.service || "").toLowerCase())) {
-        failures.push({ channelId, error: "यह platform इस publishing workflow में supported नहीं है।" });
-      } else selectedChannels.push(channel);
+      const attempt = queueBatch.items.find(item => item.channelId === channelId);
+      if (!channel) {
+        const error = "यह Buffer channel connected account में नहीं मिला।";
+        failures.push({ channelId, error });
+        Object.assign(attempt || {}, { attemptStatus: "failed", error });
+      } else if (!["facebook", "instagram", "youtube"].includes(String(channel.service || "").toLowerCase())) {
+        const error = "यह platform इस publishing workflow में supported नहीं है।";
+        failures.push({ channelId, error });
+        Object.assign(attempt || {}, {
+          channelName: channel.name,
+          platform: channel.service,
+          attemptStatus: "failed",
+          error
+        });
+      } else {
+        Object.assign(attempt || {}, {
+          channelName: channel.name,
+          platform: channel.service,
+          attemptStatus: "processing"
+        });
+        selectedChannels.push(channel);
+      }
     }
 
     const mutation = `mutation CreatePost($input: CreatePostInput!) {
@@ -730,7 +993,7 @@ app.post("/api/jobs/:id/buffer/queue-all", async (req, res) => {
         const action = result.createPost;
         if (action?.message) throw new Error(action.message);
         if (!action?.post?.id) throw new Error("Buffer ने post ID वापस नहीं किया।");
-        recordBufferQueuePost(job, {
+        const savedPost = recordBufferQueuePost(job, {
           videoFingerprint,
           postId: action.post.id,
           channelId: channel.id,
@@ -738,6 +1001,17 @@ app.post("/api/jobs/:id/buffer/queue-all", async (req, res) => {
           platform: channel.service,
           dueAt: action.post.dueAt || null
         });
+        savedPost.batchId = queueBatch.batchId;
+        const attempt = queueBatch.items.find(item => item.channelId === channel.id);
+        Object.assign(attempt || {}, {
+          attemptStatus: "submitted",
+          postId: action.post.id,
+          dueAt: action.post.dueAt || null,
+          bufferStatus: action.post.status || "scheduled",
+          submittedAt: new Date().toISOString(),
+          error: null
+        });
+        writeJobs(jobs);
         console.info("[buffer-queue] queued " + platform + " · " + channel.name + " · " + action.post.id);
         return {
           result: {
@@ -751,20 +1025,31 @@ app.post("/api/jobs/:id/buffer/queue-all", async (req, res) => {
           failure: null
         };
       } catch (error) {
-        console.error("[buffer-queue] failed " + platform + " · " + channel.name + ": " + (error.message || "Queue failed"));
+        const message = error.message || "इस channel पर post queue नहीं हो पाई।";
+        const attempt = queueBatch.items.find(item => item.channelId === channel.id);
+        Object.assign(attempt || {}, {
+          attemptStatus: "failed",
+          failedAt: new Date().toISOString(),
+          error: message
+        });
+        writeJobs(jobs);
+        console.error("[buffer-queue] failed " + platform + " · " + channel.name + ": " + message);
         return {
           result: null,
           failure: {
             channelId: channel.id,
             channelName: channel.name,
             platform: channel.service,
-            error: error.message || "इस channel पर post queue नहीं हो पाई।"
+            error: message
           }
         };
       }
     }));
     const results = queueOutcomes.map(item => item.result).filter(Boolean);
     failures.push(...queueOutcomes.map(item => item.failure).filter(Boolean));
+
+    queueBatch.status = results.length === 0 ? "failed" : failures.length ? "partial" : "submitted";
+    queueBatch.completedAt = new Date().toISOString();
 
     if (results.length) {
       job.bufferVideoUrl = videoUrl;
@@ -774,6 +1059,7 @@ app.post("/api/jobs/:id/buffer/queue-all", async (req, res) => {
     const status = results.length === 0 ? 502 : failures.length ? 207 : 200;
     console.info("[buffer-queue-all] completed in " + (Date.now() - queueStartedAt) +
       "ms; queued=" + results.length + "; failed=" + failures.length);
+    writeJobs(jobs);
     res.status(status).json({
       ok: results.length > 0 && failures.length === 0,
       queuedCount: results.length,
@@ -783,10 +1069,21 @@ app.post("/api/jobs/:id/buffer/queue-all", async (req, res) => {
       job
     });
   } catch (error) {
+    queueBatch.status = "failed";
+    queueBatch.completedAt = new Date().toISOString();
+    for (const attempt of queueBatch.items) {
+      if (["pending", "processing"].includes(attempt.attemptStatus)) {
+        attempt.attemptStatus = "failed";
+        attempt.failedAt = queueBatch.completedAt;
+        attempt.error = error.message || "Buffer queue request पूरी नहीं हो सकी।";
+      }
+    }
+    writeJobs(jobs);
     console.error("[buffer-queue-all] failed after " + (Date.now() - queueStartedAt) +
       "ms: " + (error.message || "Unknown queue error"));
     res.status(error.status || 502).json({
-      error: error.message || "Buffer से channel list या queue request पूरी नहीं हो सकी।"
+      error: error.message || "Buffer से channel list या queue request पूरी नहीं हो सकी।",
+      job
     });
   }
 });
