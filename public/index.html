@@ -285,7 +285,7 @@
     <header class="topbar">
       <div class="crumb">Workspace&nbsp; / &nbsp;Dashboard</div>
       <div class="top-actions">
-        <span class="connection"><span class="dot"></span>Local workspace</span>
+        <span class="connection"><span class="dot"></span>Cloud-ready workspace</span>
         <a class="secondary-btn" href="/publishing.html">Publishing Centre</a>
         <a class="primary-btn" href="#create">＋ New video brief</a>
         <button class="secondary-btn" id="logoutBtn" type="button">Sign out</button>
@@ -606,7 +606,7 @@
         <p class="privacy-note">Free-tier AI requests are sent to Google. Do not include client names, private therapy notes or other sensitive personal information. Generated scripts need your review before publication.</p>
       </div>
     </dialog>
-    <p class="footer-note">यह dashboard video briefs और production status manage करता है। Script Studio में Hindi script, voice, scene images, subtitles और browser-based video rendering उपलब्ध हैं। Buffer Queue में post भेजने से पहले dashboard में status Approved होना जरूरी है।</p>
+    <p class="footer-note">यह dashboard video briefs और production status manage करता है। Script Studio में Hindi script, voice, scene images, subtitles और Oracle server पर background video rendering उपलब्ध है। Buffer Queue में post भेजने से पहले dashboard में status Approved होना जरूरी है।</p>
   </main>
 </div>
 
@@ -1740,6 +1740,12 @@
       : null;
     download.textContent = "Download " + currentVideoExtension.toUpperCase() + " video" + (sizeMb ? " (" + sizeMb + " MB)" : "");
     document.getElementById("videoResult").style.display = "block";
+    const subtitleDownload = document.getElementById("subtitleDownload");
+    if (job.subtitleFile) {
+      subtitleDownload.href = "/outputs/" + encodeURIComponent(job.subtitleFile);
+      subtitleDownload.download = "antardrishti-" + job.id.slice(0, 8) + "-hi.srt";
+      subtitleDownload.textContent = "Download Hindi subtitles (.srt)";
+    }
     refreshBufferPublishControls();
     return true;
   }
