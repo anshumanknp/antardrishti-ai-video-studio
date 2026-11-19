@@ -2146,6 +2146,6 @@ app.patch("/api/jobs/:id", (req, res) => {
 
 renderQueue.recover();
 
-app.listen(PORT, "0.0.0.0", () => {
+app.listen(PORT, process.env.HOST || "0.0.0.0", () => {
   console.log("Antardrishti Studio running on port " + PORT + " (local network enabled)");
 });
