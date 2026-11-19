@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<rect width="512" height="512" rx="112" fill="#101827"/>
+<circle cx="256" cy="230" r="148" fill="none" stroke="#d7ae69" stroke-width="18"/>
+<circle cx="256" cy="230" r="104" fill="none" stroke="#d7ae69" stroke-width="5" opacity=".45"/>
+<path d="M256 103v40M256 317v40M129 230h40M343 230h40M166 140l29 29M317 291l29 29M346 140l-29 29M195 291l-29 29" stroke="#d7ae69" stroke-width="12" stroke-linecap="round"/>
+<path d="M167 346h178" stroke="#d7ae69" stroke-width="12" stroke-linecap="round"/>
+<text x="256" y="272" text-anchor="middle" font-family="Georgia,serif" font-size="150" font-weight="700" fill="#f4f0e8">अ</text>
+</svg>
