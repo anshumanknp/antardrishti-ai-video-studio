@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildBufferVideoPostInput, validatePublicVideoUrl } from "../src/buffer-api.js";
+import { buildBufferVideoPostInput, validatePublicVideoUrl, validateScheduledAt } from "../src/buffer-api.js";
 
 const videoUrl = "https://cdn.example.com/short.mp4";
 const copy = {
@@ -35,6 +35,36 @@ test("builds an Instagram Reel with feed sharing and AI disclosure", () => {
   assert.equal(input.metadata.instagram.shouldShareToFeed, true);
   assert.equal(input.metadata.instagram.isAiGenerated, true);
   assert.equal(input.text, copy.instagramCaption);
+});
+
+test("builds a Facebook Reel with an exact custom publishing time", () => {
+  const scheduledAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const input = buildBufferVideoPostInput({
+    channel: { id: "fb-1", service: "facebook" },
+    videoUrl,
+    platformCopy: copy,
+    scheduledAt
+  });
+  assert.equal(input.mode, "customScheduled");
+  assert.equal(input.dueAt, scheduledAt);
+  assert.equal(input.schedulingType, "automatic");
+});
+
+test("defaults to Buffer queue mode when no custom date is selected", () => {
+  const input = buildBufferVideoPostInput({
+    channel: { id: "ig-1", service: "instagram" },
+    videoUrl,
+    platformCopy: copy
+  });
+  assert.equal(input.mode, "addToQueue");
+  assert.equal("dueAt" in input, false);
+});
+
+test("validates explicit future schedule timestamps", () => {
+  const scheduledAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  assert.equal(validateScheduledAt(scheduledAt), scheduledAt);
+  assert.throws(() => validateScheduledAt("2020-01-01T10:00:00"), /explicit timezone/i);
+  assert.throws(() => validateScheduledAt(new Date(Date.now() - 60000).toISOString()), /in the future/i);
 });
 
 test("builds a YouTube post with a separate title and education category", () => {
