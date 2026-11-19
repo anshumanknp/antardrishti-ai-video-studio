@@ -184,6 +184,14 @@
     .social-copy-note, .buffer-help { margin:7px 0; color:#9eafc4; font-size:10px; line-height:1.55; }
     .buffer-grid { display:grid; grid-template-columns:1fr 1fr; gap:11px; align-items:end; margin-top:12px; }
     .buffer-grid .wide { grid-column:1/-1; }
+    .buffer-schedule-panel { margin-top:13px; padding:12px; border:1px solid #30435d; border-radius:9px; background:#101b2a; }
+    .buffer-schedule-head { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; color:#e6c78e; font-size:12px; font-weight:650; }
+    .buffer-schedule-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; margin-top:10px; }
+    .buffer-schedule-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(165px, .9fr); align-items:center; gap:10px; padding:9px; border:1px solid #2d4058; border-radius:8px; background:#172438; }
+    .buffer-schedule-row strong { display:block; color:#e8eef6; font-size:11px; }
+    .buffer-schedule-row small { display:block; margin-top:3px; color:#97a9bd; font-size:9px; }
+    .buffer-schedule-row input { width:100%; min-width:0; min-height:36px; padding:6px; background:#0d1725; color:#edf2f7; border:1px solid #3a506b; border-radius:6px; font:inherit; font-size:10px; }
+    @media (max-width:700px) { .buffer-schedule-list { grid-template-columns:1fr; } .buffer-schedule-row { grid-template-columns:1fr; } }
     .buffer-channel-selector { margin-top:12px; }
     .buffer-channel-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:8px; }
     .buffer-channel-option { display:flex; align-items:center; gap:9px; min-width:0; margin:0; padding:10px 11px; border:1px solid #34465e; border-radius:8px; background:#19273a; color:#dce5ef; cursor:pointer; }
@@ -559,9 +567,14 @@
             <input id="bufferAiDisclosure" type="checkbox" checked style="width:auto;min-height:0">
             Mark this post as AI-generated where the channel supports disclosure
           </label>
+          <div class="buffer-schedule-panel">
+            <div class="buffer-schedule-head"><span>DATE-WISE SCHEDULING · PER CHANNEL</span><span>Optional</span></div>
+            <p class="buffer-help">किसी channel के सामने date और time चुनें। खाली छोड़ने पर Buffer उस channel के अगले available queue slot का उपयोग करेगा। Time उसी Buffer channel की timezone में माना जाएगा।</p>
+            <div class="buffer-schedule-list" id="bufferScheduleList"><p class="buffer-help">पहले Buffer channels connect करें।</p></div>
+          </div>
           <div class="buffer-actions">
             <button class="secondary-btn" id="refreshBufferChannelsBtn" type="button">Connect / Refresh Buffer</button>
-            <button class="primary-btn" id="sendToBufferBtn" type="button" disabled>Queue to Selected Channels</button>
+            <button class="primary-btn" id="sendToBufferBtn" type="button" disabled>Queue / Schedule Selected Channels</button>
           </div>
           <p class="buffer-help" id="bufferSetupNote">Buffer API key project की local .env file में सुरक्षित रखें। इसे chat या GitHub में share न करें।</p>
           <p class="buffer-help" id="bufferHostingNote">पहली बार चलाने से पहले Cloudinary का one-time upload setup पूरा करें।</p>
@@ -707,6 +720,7 @@
   let currentSubtitleUrl = null;
   let imageGenerationEnabled = false;
   let bufferChannels = [];
+  let bufferScheduleValues = {};
   let cloudinaryConfig = null;
   let brandLogoImage = null;
   let brandLogoMeta = null;
@@ -1234,6 +1248,89 @@
       .map(input => input.value);
   }
 
+  function getTimeZoneParts(date, timeZone) {
+    let zone = timeZone || "Asia/Kolkata";
+    let parts;
+    try {
+      parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+      }).formatToParts(date);
+    } catch (_) {
+      zone = "Asia/Kolkata";
+      parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+      }).formatToParts(date);
+    }
+    const values = {};
+    parts.forEach(part => { if (part.type !== "literal") values[part.type] = part.value; });
+    return values;
+  }
+
+  function formatDateTimeLocalInZone(date, timeZone) {
+    const parts = getTimeZoneParts(date, timeZone);
+    return parts.year + "-" + parts.month + "-" + parts.day + "T" + parts.hour + ":" + parts.minute;
+  }
+
+  function dateTimeLocalToIso(value, timeZone) {
+    const match = /^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})$/.exec(String(value || ""));
+    if (!match) throw new Error("हर custom schedule के लिए पूरी date और time चुनें।");
+    const [, year, month, day, hour, minute] = match.map((part, index) => index ? Number(part) : part);
+    const targetWallTime = Date.UTC(year, month - 1, day, hour, minute);
+    let guess = targetWallTime;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const local = getTimeZoneParts(new Date(guess), timeZone);
+      const representedWallTime = Date.UTC(
+        Number(local.year), Number(local.month) - 1, Number(local.day),
+        Number(local.hour), Number(local.minute)
+      );
+      guess += targetWallTime - representedWallTime;
+    }
+    const confirmed = getTimeZoneParts(new Date(guess), timeZone);
+    const matches = Number(confirmed.year) === year &&
+      Number(confirmed.month) === month && Number(confirmed.day) === day &&
+      Number(confirmed.hour) === hour && Number(confirmed.minute) === minute;
+    if (!matches) throw new Error("इस channel timezone में चुना गया local time मौजूद नहीं है। दूसरा समय चुनें।");
+    if (guess <= Date.now() + 60000) throw new Error("Publishing time कम-से-कम एक मिनट भविष्य में चुनें।");
+    return new Date(guess).toISOString();
+  }
+
+  function renderBufferScheduleInputs() {
+    const host = document.getElementById("bufferScheduleList");
+    if (!host) return;
+    const selectedIds = new Set(getSelectedBufferChannelIds());
+    const selected = bufferChannels.filter(channel => selectedIds.has(channel.id));
+    if (!selected.length) {
+      host.innerHTML = '<p class="buffer-help">कम-से-कम एक Buffer channel चुनें।</p>';
+      return;
+    }
+    host.innerHTML = selected.map(channel => {
+      const timezone = channel.timezone || "Asia/Kolkata";
+      const value = bufferScheduleValues[channel.id] || "";
+      const min = formatDateTimeLocalInZone(new Date(), timezone);
+      return '<label class="buffer-schedule-row">' +
+        '<span><strong>' + escapeHtml(String(channel.service || "").toUpperCase() + " · " + channel.name) + '</strong>' +
+        '<small>Channel timezone: ' + escapeHtml(timezone) + '</small></span>' +
+        '<input type="datetime-local" data-channel-schedule="' + escapeHtml(channel.id) + '" min="' + escapeHtml(min) +
+        '" value="' + escapeHtml(value) + '" aria-label="Schedule ' + escapeHtml(channel.name) + '"></label>';
+    }).join("");
+  }
+
+  function getSelectedBufferChannelSchedules(channelIds) {
+    const schedules = {};
+    channelIds.forEach(channelId => {
+      const value = String(bufferScheduleValues[channelId] || "").trim();
+      if (!value) {
+        schedules[channelId] = null;
+        return;
+      }
+      const channel = bufferChannels.find(item => item.id === channelId);
+      schedules[channelId] = dateTimeLocalToIso(value, channel?.timezone || "Asia/Kolkata");
+    });
+    return schedules;
+  }
+
   function refreshBufferPublishControls() {
     const approved = activeJob?.status === "approved";
     const savedCopy = isCurrentPlatformCopySaved();
@@ -1399,6 +1496,7 @@
           '<span>' + escapeHtml(channelLabel) + orgLabel + '</span></label>';
       }).join("") || '<p class="buffer-help">Connected Buffer account में supported Facebook, Instagram या YouTube channel नहीं मिला।</p>';
 
+      renderBufferScheduleInputs();
       setBufferStatus(bufferChannels.length ? "Connected · " + bufferChannels.length + " channels" : "No supported channels", bufferChannels.length > 0);
       document.getElementById("bufferSetupNote").textContent = bufferChannels.length
         ? "Buffer connected. हर platform का पहला channel default selected है; चाहें तो selection बदलें।"
@@ -1523,6 +1621,14 @@
       resultHost.classList.add("error");
       return;
     }
+    let channelSchedules;
+    try {
+      channelSchedules = getSelectedBufferChannelSchedules(channelIds);
+    } catch (error) {
+      resultHost.textContent = error.message || "Publishing date/time सही नहीं है।";
+      resultHost.classList.add("error");
+      return;
+    }
     if (!isCurrentPlatformCopySaved()) {
       resultHost.textContent = "Captions या YouTube SEO keywords में unsaved बदलाव हैं। पहले Save Social Copy करें और फिर job को दोबारा Approved करें।";
       resultHost.classList.add("error");
@@ -1539,13 +1645,15 @@
       button.textContent = alreadyHosted ? "Checking Buffer…" : "Uploading video…";
       const videoUrl = await getHostedBufferVideoUrl();
 
-      resultHost.textContent = channelIds.length + " selected channel(s) पर Buffer queue request भेजी जा रही है…";
-      button.textContent = "Queueing " + channelIds.length + " channel(s)…";
+      const customScheduleCount = Object.values(channelSchedules).filter(Boolean).length;
+      resultHost.textContent = channelIds.length + " selected channel(s) पर Buffer publishing request भेजी जा रही है…";
+      button.textContent = (customScheduleCount ? "Scheduling " : "Queueing ") + channelIds.length + " channel(s)…";
       const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/buffer/queue-all", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           channelIds,
+          channelSchedules,
           videoUrl,
           isAiGenerated: document.getElementById("bufferAiDisclosure").checked
         }),
@@ -1569,8 +1677,12 @@
       const failedNames = (result.failures || []).map(item =>
         (item.channelName || item.platform || "Channel") + ": " + item.error
       );
+      const customScheduledCount = (result.results || []).filter(item => item.scheduleMode === "custom").length;
+      const queueCount = Number(result.queuedCount || 0) - customScheduledCount;
       resultHost.textContent = Number(result.queuedCount || 0) +
-        " post(s) Buffer Queue में add हुईं" +
+        " post(s) Buffer ने accept कीं" +
+        (customScheduledCount ? " · " + customScheduledCount + " fixed date/time पर schedule हुईं" : "") +
+        (queueCount > 0 ? " · " + queueCount + " Buffer के अगले queue slot में गईं" : "") +
         (queuedNames.length ? " — " + queuedNames.join(", ") : "") +
         (Number(result.failedCount || 0) ? ". Failed: " + failedNames.join(" | ") : ".");
       resultHost.classList.toggle("error", Number(result.failedCount || 0) > 0);
@@ -1580,13 +1692,15 @@
         : error.message || "Buffer publishing पूरा नहीं हो पाया।";
       resultHost.classList.add("error");
     } finally {
-      button.textContent = "Queue to Selected Channels";
+      button.textContent = "Queue / Schedule Selected Channels";
       refreshBufferPublishControls();
     }
   }
 
   function displayScript(job) {
     activeJob = job;
+    bufferScheduleValues = {};
+    renderBufferScheduleInputs();
     activeScriptData = job.scriptData || null;
     // Caption generation depends on the loaded script, not on the startup health check.
     document.getElementById("generateSocialCopyBtn").disabled = !activeScriptData;
@@ -2357,7 +2471,15 @@
   document.getElementById("copyYoutubeDescriptionBtn").addEventListener("click", () => copySocialField("youtubeDescription", "YouTube description"));
   document.getElementById("copyYoutubeTagsBtn").addEventListener("click", () => copySocialField("youtubeTags", "YouTube SEO keywords"));
   document.getElementById("refreshBufferChannelsBtn").addEventListener("click", refreshBufferChannels);
-  document.getElementById("bufferChannelList").addEventListener("change", refreshBufferPublishControls);
+  document.getElementById("bufferChannelList").addEventListener("change", () => {
+    renderBufferScheduleInputs();
+    refreshBufferPublishControls();
+  });
+  document.getElementById("bufferScheduleList").addEventListener("input", event => {
+    const input = event.target.closest("[data-channel-schedule]");
+    if (!input) return;
+    bufferScheduleValues[input.dataset.channelSchedule] = input.value;
+  });
   ["facebookCaption", "instagramCaption", "youtubeTitle", "youtubeDescription", "youtubeTags"].forEach(id => {
     document.getElementById(id).addEventListener("input", refreshBufferPublishControls);
   });
