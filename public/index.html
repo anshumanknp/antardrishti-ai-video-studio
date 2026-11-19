@@ -1551,57 +1551,30 @@
 
   async function getHostedBufferVideoUrl() {
     if (activeJob?.bufferVideoUrl && !currentVideoNeedsUpload) return activeJob.bufferVideoUrl;
-    if (!currentVideoBlob || currentVideoJobId !== activeJobId) {
-      throw new Error("पहले इसी video job में final video बनाएं।");
+    if (!activeJob?.renderedVideoFile) {
+      throw new Error("पहले इसी video job में Oracle server पर final video render करें।");
     }
     if (!cloudinaryConfig?.configured || !cloudinaryConfig.cloudName || !cloudinaryConfig.uploadPreset) {
-      throw new Error("Cloudinary one-time setup बाकी है। .env में CLOUDINARY_CLOUD_NAME और CLOUDINARY_UPLOAD_PRESET जोड़ें, फिर server restart करें।");
+      throw new Error("Cloudinary one-time setup बाकी है। Server environment में CLOUDINARY_CLOUD_NAME और CLOUDINARY_UPLOAD_PRESET सेट करें।");
     }
 
-    const mimeType = String(currentVideoBlob.type || "");
-    if (!mimeType.startsWith("video/mp4") && !mimeType.startsWith("video/webm")) {
-      throw new Error("Browser ने MP4 या WebM video नहीं बनाया। Final video फिर से render करें।");
-    }
-
-    const formData = new FormData();
-    const fileName = "antardrishti-" + activeJobId.slice(0, 8) + "." + currentVideoExtension;
-    formData.append("file", currentVideoBlob, fileName);
-    formData.append("upload_preset", cloudinaryConfig.uploadPreset);
-
-    const uploadEndpoint = "https://api.cloudinary.com/v1_1/" +
-      encodeURIComponent(cloudinaryConfig.cloudName) + "/video/upload";
-    const uploadResult = await uploadCloudinaryVideo(uploadEndpoint, formData, percent => {
-      const resultHost = document.getElementById("bufferResult");
-      resultHost.classList.remove("error");
-      resultHost.textContent = percent >= 100
-        ? "Cloudinary upload पूरा हुआ। Video URL save हो रहा है…"
-        : "Cloudinary पर video upload हो रहा है: " + percent + "%";
-    });
-
-    let videoUrl = uploadResult.secure_url || "";
-    if (mimeType.startsWith("video/webm")) {
-      const mp4Transform = (Array.isArray(uploadResult.eager) ? uploadResult.eager : [])
-        .find(item => /\.mp4(?:$|\?)/i.test(String(item.secure_url || item.url || "")));
-      videoUrl = mp4Transform?.secure_url || mp4Transform?.url || "";
-      if (!videoUrl) {
-        throw new Error("Browser ने WebM बनाया। Cloudinary upload preset में synchronous MP4/H.264 eager conversion enable करना होगा। README में setup steps देखें।");
-      }
-    }
-    if (!videoUrl.startsWith("https://")) {
-      throw new Error("Cloudinary ने public HTTPS video URL नहीं लौटाया।");
-    }
-
-    const saveResponse = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/buffer/media", {
+    const resultHost = document.getElementById("bufferResult");
+    resultHost.classList.remove("error");
+    resultHost.textContent = "Oracle server से Cloudinary पर final MP4 upload हो रही है…";
+    const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/host-video", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ videoUrl }),
-      signal: AbortSignal.timeout(15000)
+      body: JSON.stringify({})
     });
-    const saved = await saveResponse.json();
-    if (!saveResponse.ok) throw new Error(saved.error || "Hosted video URL job में save नहीं हो पाया।");
-    activeJob = saved.job;
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "Server से Cloudinary upload पूरा नहीं हुआ।");
+    if (!String(result.videoUrl || "").startsWith("https://")) {
+      throw new Error("Cloudinary ने public HTTPS video URL नहीं लौटाया।");
+    }
+    activeJob = result.job || activeJob;
     currentVideoNeedsUpload = false;
-    return videoUrl;
+    resultHost.textContent = "Cloudinary upload पूरा हुआ। Buffer publishing शुरू की जा सकती है।";
+    return result.videoUrl;
   }
 
   async function sendVideoToBufferAll() {
@@ -1733,32 +1706,35 @@
       voicePlayer.removeAttribute("src");
       voicePlayer.load();
     }
-    document.getElementById("renderVideoBtn").disabled = !activeScriptData;
+    const renderButton = document.getElementById("renderVideoBtn");
+    const renderIsActive = ["queued", "rendering"].includes(job.renderStatus);
+    renderButton.disabled = !activeScriptData || renderIsActive;
+    renderButton.textContent = renderIsActive ? "Rendering on Server…" : "Render on Cloud Server";
     document.getElementById("generateVoiceBtn").disabled = !activeScriptData;
     document.getElementById("autoCreateVideoBtn").disabled = !imageGenerationEnabled || !activeScriptData;
   }
 
   async function restoreSavedRenderedVideo(job) {
     if (!job?.renderedVideoFile) return false;
-    if (currentVideoBlob && currentVideoJobId === job.id && currentVideoSavedLocally) return true;
-    const response = await fetch("/outputs/" + encodeURIComponent(job.renderedVideoFile), { cache: "no-store" });
-    if (!response.ok) throw new Error("Project outputs folder से saved video वापस नहीं पढ़ पाई।");
-    const blob = await response.blob();
-    if (blob.size < 1000) throw new Error("Saved rendered video file खाली या खराब है।");
-    if (currentVideoUrl) URL.revokeObjectURL(currentVideoUrl);
-    currentVideoBlob = blob;
+    if (currentVideoJobId !== job.id && currentVideoUrl) URL.revokeObjectURL(currentVideoUrl);
+    currentVideoBlob = null;
+    currentVideoUrl = null;
     currentVideoJobId = job.id;
     currentVideoSavedLocally = true;
     currentVideoExtension = String(job.renderedVideoFile).toLowerCase().endsWith(".webm") ? "webm" : "mp4";
     currentVideoNeedsUpload = !job.bufferVideoUrl;
-    currentVideoUrl = URL.createObjectURL(blob);
+    const fileUrl = "/outputs/" + encodeURIComponent(job.renderedVideoFile) + "?v=" +
+      encodeURIComponent(job.renderedVideoSavedAt || job.updatedAt || Date.now());
     const preview = document.getElementById("videoPreview");
-    preview.src = currentVideoUrl;
+    preview.src = fileUrl;
     preview.load();
     const download = document.getElementById("videoDownload");
-    download.href = currentVideoUrl;
+    download.href = fileUrl;
     download.download = "antardrishti-" + job.id.slice(0, 8) + "." + currentVideoExtension;
-    download.textContent = "Download " + currentVideoExtension.toUpperCase() + " video (" + Math.round(blob.size / 1024 / 1024 * 10) / 10 + " MB)";
+    const sizeMb = Number(job.renderedVideoSizeBytes) > 0
+      ? Math.round(Number(job.renderedVideoSizeBytes) / 1024 / 1024 * 10) / 10
+      : null;
+    download.textContent = "Download " + currentVideoExtension.toUpperCase() + " video" + (sizeMb ? " (" + sizeMb + " MB)" : "");
     document.getElementById("videoResult").style.display = "block";
     refreshBufferPublishControls();
     return true;
@@ -1780,6 +1756,9 @@
     setStudioStatus("Video brief खुल रहा है…");
     displayScript(activeJob);
     if (!scriptDialog.open) scriptDialog.showModal();
+    if (["queued", "rendering"].includes(activeJob.renderStatus)) {
+      void pollServerRender(jobId).catch(error => setStudioStatus(error.message || "Render status check नहीं हो पाया।", true));
+    }
     if (activeJob.renderedVideoFile) {
       try {
         await restoreSavedRenderedVideo(activeJob);
