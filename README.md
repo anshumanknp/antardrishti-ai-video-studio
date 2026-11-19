@@ -31,7 +31,7 @@ A separate, local-first workspace for planning and tracking Antardrishti short-v
 4. Restart the local server with `npm start`.
 5. Add a video brief, then select **Open Studio** in the production queue.
 6. Generate the Hindi-first Devanagari script, review/edit it, choose a voice style, and generate the voice.
-7. Select **Create Slide Video** to make a vertical video in the browser. Download the video and the separate Hindi SRT subtitle file.
+7. Select **Render on Cloud** to send the video to the server-side render queue. The server creates the MP4 and separate Hindi SRT file; you can close the mobile browser while the render continues.
 
 ### Voice options
 
@@ -63,13 +63,13 @@ Each generated scene now carries a production brief alongside its Hindi dialogue
 - **Transition:** the edit into the next scene, using a simple cut, dissolve or match cut.
 - **Audio cue:** a short music or sound-effect direction that stays behind the narration.
 
-The server validates these fields before accepting a generated script. The image prompt uses the requested shot type, and the browser renderer applies simulated push-in, pull-out, pan and tilt moves to generated stills. A dissolve/cross-fade is applied when that transition is requested; hard cuts remain immediate. These are still-image camera effects, not real camera footage or character movement. Audio cues remain production notes; this version does not generate a separate music or sound-effect track.
+The server validates these fields before accepting a generated script. The image prompt uses the requested shot type. The cloud renderer applies a slow zoom to generated stills. These are still-image camera effects, not real camera footage or character movement. A dissolve/cross-fade is applied when that transition is requested; hard cuts remain immediate. These are still-image camera effects, not real camera footage or character movement. Audio cues remain production notes; this version does not generate a separate music or sound-effect track.
 
 ### Video and subtitles
 
-The current video builder uses animated gradient title cards and generated scene artwork. It starts narration at the opening, overlays the uploaded logo, shows each scene's main subtitle and its sequential Hindi caption segments (2–3 segments per scene for 15-second videos; 3–4 for longer videos), and creates a scene-timed Hindi `.srt` file. Shot framing and supported camera moves affect the rendered image. Content, logo and progress indicator stay inside a central Reels-safe region; the video preview has an optional Instagram UI/safe-area guide. The guide is preview-only and is not exported. MP4 or WebM output depends on browser support. Caption segments are timed evenly within each scene, not word-level forced alignment.
+Video rendering runs on the server through FFmpeg, not in the mobile browser. It creates a 1080×1920 MP4, mixes the saved Hindi voice, applies the uploaded logo and Devanagari captions, and writes a separate scene-timed Hindi `.srt` file. Caption segments are timed evenly within each scene, not word-level forced alignment. The current server renderer uses a slow zoom on still images; it does not create real moving footage.
 
-**Rendered-video persistence:** After the browser finishes rendering, the MP4/WebM file is uploaded to the local server and saved in the project's `outputs/` folder. Its filename is recorded on the video job. Reopening Script Studio after a page refresh or server restart restores the saved video preview and makes it available for Cloudinary/Buffer publishing without rendering again. If the server cannot save the file, the Studio warns you to download it before refreshing. Changing the script, voice or scene artwork invalidates the old render so it cannot be approved and published as if it matched the new content.
+**Cloud render queue:** Pressing Render on Cloud creates a persistent render job. The server runs one render at a time by default, saves progress and recovers queued/interrupted jobs after restart. Closing the mobile browser does not stop the render. Reopening Script Studio shows the saved render status or restores the finished MP4. Changing the script, voice or scene artwork while a render is running causes the stale output to be rejected.
 
 The Studio uses a duration-based visual plan rather than generating a single image per scene. The current plan is 5 visual shots / 4 AI images for 15 seconds, 8 / 6 for 30 seconds, 10 / 8 for 45 seconds and 13 / 10 for 60 seconds. Extra visual shots reuse an existing scene image with a different crop and simulated camera move, so they do not trigger another image request. Only missing planned images are generated. The gallery also has a per-image regenerate action; it replaces only that selected image. The `@cf/black-forest-labs/flux-1-schnell` model creates square stills that the renderer crops to 9:16. Cloudflare's 10,000 AI Neurons/day Free allocation is shared across the account. The Studio applies a separate safety cap of 30 image requests per UTC day; this app cap is not a measurement of Cloudflare Neurons. There is no paid image-provider fallback. AI presenter footage and real generated cinematic video clips remain separate future integrations.
 
@@ -213,3 +213,10 @@ Avoid claims that hypnotherapy or past-life regression can diagnose, cure, or re
 ## Security
 
 Keep API keys in a local `.env` file or deployment secrets. Never commit credentials.
+
+
+### Oracle Cloud deployment
+
+The deployment starter files are in docs/oracle-cloud-deployment.md, scripts/oracle-bootstrap.sh and deploy/. The app supports external persistent folders through DATA_DIR and OUTPUT_DIR; the systemd template uses /var/lib/antardrishti/. Install Node.js 22, FFmpeg and Noto Devanagari fonts on the VM.
+
+**Security gate:** this repository version does not yet include Admin Login or API authorization. Do not expose the app publicly until that work is complete and tested. Keep the Node port private behind Nginx.
