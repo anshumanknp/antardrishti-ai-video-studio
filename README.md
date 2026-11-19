@@ -110,7 +110,7 @@ Each field can be edited and copied independently. Script regeneration or Devana
 
 Open **Publishing Centre** from the dashboard navigation. The separate page is read-only and retrieves Buffer posts for the connected organizations, including status, scheduled date, sent date, channel and publishing error message. It compares Buffer post IDs with Antardrishti's local queue records and shows failed or unverified Studio attempts separately.
 
-Each new **Queue to Selected Channels** batch is saved locally before the Buffer requests start. The Studio records an individual outcome for every channel, including failures and successful Buffer Post IDs. This keeps a permanent submission trail even if one selected channel fails.
+Each new **Queue to Selected Channels** batch is saved locally before the Buffer requests start. The Studio records an individual outcome for every channel, including failures and successful Buffer Post IDs. The latest 100 queue batches per video job are retained in the local job record.
 
 The tracker sync reads up to 20 pages of 50 posts per organization, covering a two-year history window. Buffer keeps sent and failed posts for two years; older sent or failed posts may no longer be available from its API. If the page cap is reached, the tracker warns that the returned list is incomplete. Scheduled dates are displayed using the Buffer channel's configured timezone.
 
