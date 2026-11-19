@@ -246,7 +246,7 @@ export async function renderJobWithFfmpeg(job, options = {}) {
       if (slide.imagePath) args.push("-loop", "1", "-framerate", String(FPS), "-t", slide.duration.toFixed(3), "-i", slide.imagePath);
       else {
         const colour = slide.type === "scene" ? "172b42" : "0d1728";
-        args.push("-f", "lavfi", "-i", "color=c=" + colour + ":s=" + WIDTH + "x" + HEIGHT + ":r=" + FPS + ":d=" + slide.duration.toFixed(3));
+        args.push("-f", "lavfi", "-i", "color=c=0x" + colour + ":s=" + WIDTH + "x" + HEIGHT + ":r=" + FPS + ":d=" + slide.duration.toFixed(3));
       }
     });
     const logoInputIndex = logoPath ? timeline.slides.length : -1;
