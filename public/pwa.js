@@ -34,14 +34,51 @@
       "box-shadow:0 5px 22px #0006"
     ].join(";");
     installButton.addEventListener("click", async () => {
-      if (!installPrompt) return;
+      if (!installPrompt) {
+        showInstallHelp();
+        return;
+      }
       installPrompt.prompt();
       await installPrompt.userChoice.catch(() => null);
       installPrompt = null;
-      installButton.style.display = "none";
+      installButton.textContent = "Install instructions";
+      if (!isStandalone()) showInstallHelp();
     });
     document.body.appendChild(installButton);
     return installButton;
+  }
+
+  function isStandalone() {
+    return window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  }
+
+  function showInstallHelp() {
+    let dialog = document.getElementById("antardrishti-install-help");
+    if (!dialog) {
+      dialog = document.createElement("dialog");
+      dialog.id = "antardrishti-install-help";
+      dialog.style.cssText = "max-width:360px;width:calc(100% - 32px);padding:22px;border:1px solid #52627a;border-radius:14px;background:#142235;color:#edf2f7;box-shadow:0 20px 70px #000b";
+      const title = document.createElement("h2");
+      title.textContent = "Install Antardrishti";
+      title.style.cssText = "margin:0 0 12px;font:22px Georgia,serif";
+      const steps = document.createElement("p");
+      steps.style.cssText = "font:13px/1.7 system-ui,sans-serif;color:#c4d0de";
+      steps.textContent = /iPhone|iPad|iPod/.test(navigator.userAgent)
+        ? "Safari में Share बटन दबाएँ, फिर Add to Home Screen चुनें। इसके बाद Add दबाएँ।"
+        : "Chrome में ऊपर ⋮ menu खोलें और Install app या Add to Home screen चुनें।";
+      const note = document.createElement("p");
+      note.style.cssText = "font:11px/1.6 system-ui,sans-serif;color:#9aacc0";
+      note.textContent = "Install का विकल्प HTTPS पर hosted version में मिलेगा। App का पूरा काम करने के लिए internet और server चाहिए।";
+      const close = document.createElement("button");
+      close.type = "button";
+      close.textContent = "Close";
+      close.style.cssText = "width:100%;min-height:42px;border:0;border-radius:8px;background:#d8b77a;color:#172337;font-weight:750";
+      close.addEventListener("click", () => dialog.close());
+      dialog.append(title, steps, note, close);
+      document.body.appendChild(dialog);
+    }
+    if (typeof dialog.showModal === "function" && !dialog.open) dialog.showModal();
+    else dialog.setAttribute("open", "");
   }
 
   window.addEventListener("beforeinstallprompt", event => {
@@ -54,6 +91,17 @@
     installPrompt = null;
     if (installButton) installButton.style.display = "none";
   });
+
+  window.addEventListener("load", () => {
+    if (isStandalone() || !/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) return;
+    window.setTimeout(() => {
+      if (!installPrompt) {
+        const button = ensureInstallButton();
+        button.textContent = "Install instructions";
+        button.style.display = "block";
+      }
+    }, 1500);
+  }, { once: true });
 
   function updateNetworkNotice() {
     let notice = document.getElementById("antardrishti-network-notice");
