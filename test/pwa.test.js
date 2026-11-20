@@ -31,3 +31,16 @@ test("both dashboard pages load PWA setup and shared authentication", () => {
     assert.match(html, /src="\/auth\.js"/);
   }
 });
+
+test("mobile PWA has manual install instructions for browsers without install prompts", () => {
+  const script = fs.readFileSync(path.join(root, "pwa.js"), "utf8");
+  assert.match(script, /Add to Home Screen/);
+  assert.match(script, /Install instructions/);
+  assert.match(script, /beforeinstallprompt/);
+});
+
+test("offline session lookup does not trap the dashboard behind the login overlay", () => {
+  const script = fs.readFileSync(path.join(root, "auth.js"), "utf8");
+  assert.match(script, /if \(!navigator\.onLine\)/);
+  assert.match(script, /authPromise = null/);
+});
