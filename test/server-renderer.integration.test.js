@@ -8,7 +8,7 @@ import { renderServerVideo } from "../src/server-renderer.js";
 
 const ffmpegPath = process.env.FFMPEG_PATH || "ffmpeg";
 const ffprobePath = process.env.FFPROBE_PATH || "ffprobe";
-const fontFile = process.env.ANTRDRISHTI_FONT_FILE ||
+const fontFile = process.env.ANTARDRISHTI_FONT_FILE ||
   process.env.ANTARDRISHTI_FONT_FILE ||
   "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf";
 
