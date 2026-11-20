@@ -221,7 +221,7 @@
     if (!authPromise) {
       authPromise = initializeSession().catch(error => {
         buildOverlay();
-        openLogin(true);
+        openLogin(false);
         message.textContent = error.message || "Admin session initialize नहीं हो पाया।";
         throw error;
       });
