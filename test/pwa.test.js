@@ -14,6 +14,8 @@ test("PWA manifest declares a standalone portrait app", () => {
   assert.equal(manifest.display, "standalone");
   assert.equal(manifest.orientation, "portrait");
   assert.ok(manifest.icons.some(icon => icon.src === "/icon.svg"));
+  assert.ok(manifest.shortcuts.some(item => item.url === "/"));
+  assert.ok(manifest.shortcuts.some(item => item.url === "/publishing.html"));
 });
 
 test("service worker explicitly avoids caching API and generated output data", () => {
