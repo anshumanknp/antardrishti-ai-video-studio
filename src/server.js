@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
+import { createAuthSecurity } from "./auth.js";
 import { spawnSync } from "node:child_process";
 import { readJobs as readJobStore, writeJobs as writeJobStore } from "./job-store.js";
 import { getRecommendedSceneCount, preserveSceneProductionFields, validateScriptData } from "./script-validation.js";
@@ -86,7 +87,19 @@ if (recoveredRenderTasks) {
 
 app.use(express.json({ limit: "3mb" }));
 app.use(express.static(path.join(__dirname, "..", "public")));
-app.use("/outputs", express.static(OUTPUT_DIR));
+
+const authSecurity = createAuthSecurity({
+  adminPassword: process.env.ADMIN_PASSWORD || "",
+  sessionSecret: process.env.ADMIN_SESSION_SECRET || "",
+  required: process.env.NODE_ENV === "production" || process.env.ADMIN_AUTH_REQUIRED === "true",
+  secureCookies: process.env.NODE_ENV === "production"
+});
+
+app.get("/api/auth/session", authSecurity.sessionStatus);
+app.post("/api/auth/login", authSecurity.login);
+app.post("/api/auth/logout", authSecurity.logout);
+app.use("/api", authSecurity.apiMiddleware);
+app.use("/outputs", authSecurity.outputsMiddleware, express.static(OUTPUT_DIR));
 
 function readJobs() { return readJobStore(JOBS_FILE); }
 function writeJobs(jobs) { return writeJobStore(JOBS_FILE, jobs); }
