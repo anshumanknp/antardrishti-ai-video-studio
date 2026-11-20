@@ -124,3 +124,33 @@ test("health endpoint can pass through API protection", () => {
   const auth = createAuthSecurity({ adminPassword: PASSWORD, sessionSecret: SECRET, required: true });
   assert.equal(call(auth.apiMiddleware, request({ path: "/health" })).nextCalled, true);
 });
+
+test("logout clears the cookie and revokes the current session", () => {
+  const auth = createAuthSecurity({ adminPassword: PASSWORD, sessionSecret: SECRET });
+  const loggedIn = login(auth);
+  const req = request({
+    method: "POST",
+    path: "/api/auth/logout",
+    cookie: loggedIn.cookie,
+    csrf: loggedIn.csrf,
+    origin: "https://studio.example.test"
+  });
+  const res = response();
+  auth.logout(req, res);
+  assert.equal(res.body.authenticated, false);
+  assert.match(res.headers["set-cookie"], /Max-Age=0/);
+  assert.equal(call(auth.apiMiddleware, request({ path: "/jobs", cookie: loggedIn.cookie })).res.statusCode, 401);
+});
+
+test("sessions expire after twelve hours", () => {
+  let clock = 1000;
+  const auth = createAuthSecurity({
+    adminPassword: PASSWORD,
+    sessionSecret: SECRET,
+    now: () => clock
+  });
+  const loggedIn = login(auth);
+  assert.equal(call(auth.apiMiddleware, request({ path: "/jobs", cookie: loggedIn.cookie })).nextCalled, true);
+  clock += 12 * 60 * 60 * 1000 + 1;
+  assert.equal(call(auth.apiMiddleware, request({ path: "/jobs", cookie: loggedIn.cookie })).res.statusCode, 401);
+});
