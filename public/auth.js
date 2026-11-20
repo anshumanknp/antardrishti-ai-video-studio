@@ -220,9 +220,15 @@
     if (sessionReady) return Promise.resolve();
     if (!authPromise) {
       authPromise = initializeSession().catch(error => {
+        authPromise = null;
+        if (!navigator.onLine) {
+          if (overlay) overlay.hidden = true;
+          return;
+        }
         buildOverlay();
         openLogin(false);
-        message.textContent = error.message || "Admin session initialize नहीं हो पाया।";
+        message.textContent = "Server से connection नहीं बन पाया: " +
+          (error.message || "Admin session initialize नहीं हो पाया।");
         throw error;
       });
     }
