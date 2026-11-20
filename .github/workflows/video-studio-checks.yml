@@ -16,7 +16,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
+      - name: Install FFmpeg and Hindi font
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg fonts-noto-core
+          command -v ffmpeg
+          command -v ffprobe
+          test -f /usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Check server JavaScript syntax
@@ -26,7 +33,7 @@ jobs:
           node --input-type=module -e '
             import { readFileSync, writeFileSync } from "node:fs";
             const html = readFileSync("public/index.html", "utf8");
-            const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+            const scripts = [...html.matchAll(/<script>([\\s\\S]*?)<\\/script>/g)];
             if (!scripts.length) throw new Error("Dashboard inline script not found");
             writeFileSync("/tmp/antardrishti-dashboard.js", scripts.at(-1)[1]);
           '
@@ -36,12 +43,12 @@ jobs:
           node --input-type=module -e '
             import { readFileSync, writeFileSync } from "node:fs";
             const html = readFileSync("public/publishing.html", "utf8");
-            const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+            const scripts = [...html.matchAll(/<script>([\\s\\S]*?)<\\/script>/g)];
             if (!scripts.length) throw new Error("Publishing Centre inline script not found");
             writeFileSync("/tmp/antardrishti-publishing.js", scripts.at(-1)[1]);
           '
           node --check /tmp/antardrishti-publishing.js
-      - name: Run job-store regression tests
+      - name: Run unit and FFmpeg integration tests
         run: npm test
       - name: Verify package metadata
         run: node -e "const p=require('./package.json'); if (!p.scripts || !p.scripts.start) process.exit(1); console.log(p.name, p.version)"
