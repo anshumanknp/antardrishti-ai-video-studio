@@ -114,6 +114,7 @@
     }
     notice.textContent = "आप offline हैं। App का shell खुल सकता है, लेकिन scripts, rendering और Buffer के live API काम नहीं करेंगे।";
     notice.style.display = navigator.onLine ? "none" : "block";
+    if (installButton) installButton.style.bottom = navigator.onLine ? "14px" : "76px";
   }
 
   window.addEventListener("online", updateNetworkNotice);
