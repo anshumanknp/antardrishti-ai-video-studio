@@ -210,6 +210,26 @@ The image gallery generates only missing planned assets and offers a separate **
 
 Avoid claims that hypnotherapy or past-life regression can diagnose, cure, or replace medical/mental-health care. Present guided exercises accurately and encourage qualified professional support where appropriate.
 
+## Admin login and API security
+
+Set an administrator password and a private session secret in the local `.env` file before deploying publicly:
+
+```env
+ADMIN_PASSWORD=use-a-unique-password-at-least-12-characters
+ADMIN_SESSION_SECRET=use-a-random-secret-at-least-32-characters
+ADMIN_AUTH_REQUIRED=true
+```
+
+Generate a strong session secret with:
+
+```sh
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+```
+
+The dashboard and Publishing Centre show an admin login screen when authentication is enabled. The server protects every `/api` endpoint except the read-only health check and the login/session endpoints. Files under `/outputs` also require an authenticated session. State-changing API requests require a CSRF token and same-origin request checks. Login attempts are rate-limited. The session cookie is HttpOnly and SameSite=Strict; it is Secure in production.
+
+Production mode fails closed when the admin password or session secret is missing or too short. Local development remains available without login unless `ADMIN_AUTH_REQUIRED=true` or valid admin credentials are configured. Sessions are held in server memory and expire after 12 hours; a server restart signs the user out. Use HTTPS in production and keep both values out of GitHub.
+
 ## Security
 
 Keep API keys in a local `.env` file or deployment secrets. Never commit credentials.
