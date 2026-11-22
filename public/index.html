@@ -1187,7 +1187,7 @@
       activeJob = savedJob;
       activeScriptData = savedJob.scriptData;
 
-      setStudioStatus("Step 3/4 · Gemini Free Tier से Hindi voice generate हो रही है…");
+      setStudioStatus(voiceProvider === "voicestudio" ? "Step 3/4 · VoiceStudio cloned Hindi voice generate कर रहा है…" : "Step 3/4 · Gemini Free Tier से Hindi voice generate हो रही है…");
       const voiceResponse = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/generate-voice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
