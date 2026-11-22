@@ -46,24 +46,62 @@ Female voice choices: Kore, Aoede, Leda, Zephyr and Gacrux. Male voice choices: 
 
 ### Your cloned Hindi voice with VoiceStudio
 
-The Studio can use a self-hosted [VoiceStudio](https://github.com/debpalash/VoiceStudio) server alongside Gemini TTS. This is an optional voice provider; the existing Gemini voice modes remain available.
+The Studio can use a self-hosted [VoiceStudio](https://github.com/debpalash/VoiceStudio) server alongside Gemini TTS. Gemini remains available as the default provider.
 
-1. Install VoiceStudio on a computer or server with enough memory and storage for speech models. Enable the **VoxCPM2** engine in its Model Catalogue.
-2. In VoiceStudio, create a clone profile using your own clean voice recording and its transcript. Use another person's voice only with their clear permission.
-3. Confirm that VoiceStudio's API is reachable at `/v1/models` and `/v1/audio/voices`. The saved clone should appear as a profile in the voices response.
-4. Add the VoiceStudio connection to this Studio server's private `.env` file:
+#### Prepare the Oracle/Linux host
 
-```env
-VOICE_STUDIO_BASE_URL=https://your-voice-studio-host
-VOICE_STUDIO_API_KEY=your_voice_studio_server_key
-VOICE_STUDIO_MODEL=voxcpm2
+The project includes a separate Docker sidecar for VoiceStudio. It keeps the TTS API bound to `127.0.0.1:3900`; the port is not opened to the public internet.
+
+1. Install Docker Engine with the Docker Compose v2 plugin on the same host that runs Antardrishti.
+2. Make sure Antardrishti already has a private `.env` file. Keep its existing Gemini, Cloudflare and Buffer settings.
+3. Check the server before downloading the image:
+
+```bash
+bash scripts/check-voice-studio-host.sh
 ```
 
-For a VoiceStudio process on the same machine, `http://127.0.0.1:3900` can be used for `VOICE_STUDIO_BASE_URL`. Remote VoiceStudio connections must use HTTPS and a server API key. Never put the API key in browser code, GitHub, or chat. Restart Antardrishti, open Script Studio, choose **VoiceStudio · My cloned voice**, and refresh the voice profiles.
+4. Run the setup script:
 
-Choose a saved clone and a delivery direction: Natural, Calm, Spiritual, Serious, Emotional, Energetic or Storytelling. An optional custom instruction can further guide the delivery. These are model instructions, not guaranteed emotion controls; listen to the generated Hindi audio and adjust the wording or reference recording when needed. VoiceStudio's TTS API accepts up to 4,096 characters per request, so longer narration must be shortened before using this provider. The Studio does not silently switch to Gemini if VoiceStudio is unavailable.
+```bash
+bash scripts/setup-voice-studio.sh
+```
 
-VoiceStudio's application code is AGPL-3.0. The VoxCPM upstream repository is Apache-2.0, but review the license for the exact model weights and any other engine you enable before commercial use. Voice cloning should be limited to your own voice or recordings you are authorized to use.
+The script creates a random `VOICE_STUDIO_API_KEY` in `.env` if one is not already present, sets the local VoiceStudio URL, builds a derived VoiceStudio image with `voxcpm>=2.0.3`, starts the container, and checks that the `voxcpm2` engine appears in its API model list. It never prints the key. The key is passed to VoiceStudio as `OMNIVOICE_API_KEY` and used by Antardrishti for server-to-server API calls. Restart the Antardrishti Node process after setup so it reloads the new `.env` values.
+
+The first VoxCPM2 generation downloads its multi-GB model checkpoint. CPU inference can be slow and memory-heavy; the host check warns below 16 GiB RAM and 15 GiB free disk. Those warning values are deployment precautions, not official minimum system requirements. Keep other memory-heavy services stopped during the first model load.
+
+**Oracle architecture warning:** the upstream VoiceStudio CPU Docker image currently publishes `linux/amd64`, not a native ARM64 CPU image. On an ARM64 Oracle instance, the setup script stops instead of silently starting an emulated container. Only proceed with emulation after accepting the performance cost:
+
+```bash
+VOICE_STUDIO_ALLOW_AMD64_EMULATION=1 bash scripts/setup-voice-studio.sh
+```
+
+An x86_64 host is the preferred CPU deployment. The upstream project documents native ARM64 only for supported NVIDIA GPU systems; Oracle Ampere ARM CPUs are not that configuration.
+
+#### Create your cloned voice
+
+After the container reports healthy, open VoiceStudio privately. From the server itself use `http://127.0.0.1:3900`. For access from another device, keep the port bound to loopback and use an SSH tunnel or a private Tailscale Serve connection; do not add a public firewall rule for port 3900.
+
+In VoiceStudio, create a clone profile using your own clean Hindi voice recording and its matching transcript. Use another person's voice only with their clear permission. The profile is stored in the persistent Docker volume `voicestudio-data`. VoiceStudio's API should then list it from `/v1/audio/voices`.
+
+In Antardrishti Script Studio, choose **VoiceStudio · My cloned voice**, refresh the profile list, select your clone and choose a delivery direction: Natural, Calm, Spiritual, Serious, Emotional, Energetic or Storytelling. An optional custom instruction can further guide the delivery. These are instructions to the model, not guaranteed emotion controls; listen to the Hindi sample and adjust the instructions or reference recording when needed.
+
+The integration sends Hindi language code `hi`, accepts WAV output and uses the real audio duration in the current video renderer. VoiceStudio's speech API accepts up to 4,096 characters per request, so shorten longer narration before selecting this provider. The Studio does not silently switch to Gemini if VoiceStudio is unavailable.
+
+To inspect the sidecar:
+
+```bash
+docker compose --env-file .env -f deploy/voicestudio-compose.yml ps
+docker compose --env-file .env -f deploy/voicestudio-compose.yml logs --tail=150
+```
+
+To stop it without deleting the saved clone or model cache:
+
+```bash
+docker compose --env-file .env -f deploy/voicestudio-compose.yml down
+```
+
+The source code of VoiceStudio is licensed AGPL-3.0. Review its network-use source obligations before offering a modified VoiceStudio instance as a public service. VoxCPM2 model weights and any additional models have their own terms; check the exact model card before commercial use. Voice cloning should be limited to your own voice or recordings you are authorized to use.
 
 ### Brand logo
 
