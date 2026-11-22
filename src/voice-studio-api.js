@@ -233,6 +233,7 @@ export async function generateVoiceStudioSpeech({
       model: config.model,
       input,
       voice: profileId,
+      language: "hi",
       instructions: style || "Speak natural Indian Hindi with clear pronunciation and a natural, expressive delivery. Preserve the cloned speaker's voice identity. Do not translate, omit, or add words.",
       response_format: "wav",
       speed: 1
