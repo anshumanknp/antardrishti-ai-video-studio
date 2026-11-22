@@ -100,7 +100,7 @@ After Cloudflare is configured, open a video job and press **Auto Create Video (
 
 1. Generate a Hindi script in Devanagari if one does not exist.
 2. Save the reviewed script and the selected female, male or duet voice settings.
-3. Generate the Hindi narration audio through Gemini TTS.
+3. Generate Hindi narration through the selected provider: Gemini TTS or your self-hosted VoiceStudio clone.
 4. Generate missing scene images through Cloudflare Workers AI. Existing images are reused.
 5. Render the vertical video with the voice, scene images and Hindi subtitles, then prepare the separate SRT download.
 
@@ -193,7 +193,8 @@ Keep the token private. Do not paste it into chat or commit it to GitHub. The im
 ## API models and usage
 
 - Script, Duet dialogue and social copy: `gemini-3.8-flash` (the server automatically tries `gemini-3.1-flash-lite` and `gemini-3.5-flash-lite` when a temporary capacity error occurs).
-- Hindi narration: `gemini-3.1-flash-tts-preview` (Standard free tier).
+- Default Hindi narration: `gemini-3.1-flash-tts-preview` (Standard free tier).
+- Optional cloned Hindi narration: self-hosted VoiceStudio API with the VoxCPM2 engine and a saved voice profile.
 - Optional scene images: Cloudflare Workers AI `@cf/black-forest-labs/flux-1-schnell` (free allocation; requires a Cloudflare Account ID and Workers AI API token).
 - Duet uses Gemini's two-speaker TTS configuration.
 - Blend makes two TTS requests and mixes their PCM audio into one WAV.
