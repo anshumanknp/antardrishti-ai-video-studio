@@ -10,7 +10,6 @@ if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>
 fi
 
 ARCH="$(uname -m)"
-DOCKER_PLATFORM_ARGS=()
 case "$ARCH" in
   x86_64|amd64)
     echo "Using VoiceStudio's native linux/amd64 CPU image."
@@ -39,8 +38,8 @@ EOF
 esac
 
 if [[ ! -f .env ]]; then
-  touch .env
-  chmod 600 .env
+  echo ".env is missing. Copy .env.example to .env and add your existing Gemini/Cloudflare/Buffer settings first."
+  exit 1
 fi
 
 node --input-type=module <<'NODE'
@@ -63,6 +62,8 @@ let key = findValue("VOICE_STUDIO_API_KEY");
 if (!key) {
   key = randomBytes(32).toString("base64url");
   updates.VOICE_STUDIO_API_KEY = key;
+} else if (key.length < 32) {
+  throw new Error("VOICE_STUDIO_API_KEY must be at least 32 characters. Remove the weak value and rerun setup.");
 }
 for (const [name, value] of Object.entries(updates)) {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -83,15 +84,23 @@ fi
 echo "Checking available RAM and disk before downloading the VoiceStudio image..."
 bash scripts/check-voice-studio-host.sh
 
-echo "Pulling VoiceStudio CPU image and starting the private sidecar..."
-docker compose --env-file .env -f deploy/voicestudio-compose.yml pull
+echo "Building the VoiceStudio image with VoxCPM2 and starting the private sidecar..."
+docker compose --env-file .env -f deploy/voicestudio-compose.yml build
 docker compose --env-file .env -f deploy/voicestudio-compose.yml up -d
 
 echo "VoiceStudio container started. Waiting for its health check..."
 for attempt in $(seq 1 36); do
   if docker compose --env-file .env -f deploy/voicestudio-compose.yml exec -T voicestudio curl -sf http://127.0.0.1:3900/health >/dev/null 2>&1; then
     echo "VoiceStudio health endpoint is responding."
-    echo "Next: open VoiceStudio at http://127.0.0.1:3900 through an SSH tunnel, create your own clone profile, then return to Antardrishti."
+    if docker compose --env-file .env -f deploy/voicestudio-compose.yml exec -T voicestudio python3 -c 'import json,urllib.request; d=json.load(urllib.request.urlopen("http://127.0.0.1:3900/v1/models",timeout=10)); assert any(x.get("id")=="voxcpm2" for x in d.get("data",[])), "VoxCPM2 is not listed as available"' >/dev/null 2>&1; then
+      echo "VoxCPM2 is listed as available."
+    else
+      echo "The server is up, but VoxCPM2 is not yet listed as an available engine."
+      echo "Check build/runtime logs before creating a clone profile:"
+      echo "docker compose --env-file .env -f deploy/voicestudio-compose.yml logs --tail=150"
+      exit 1
+    fi
+    echo "Next: access VoiceStudio privately, create your own clone profile, then restart Antardrishti so it reloads the .env values."
     echo "Do not expose port 3900 publicly. The API key is stored only in .env."
     exit 0
   fi
