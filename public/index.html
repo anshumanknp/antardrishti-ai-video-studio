@@ -452,8 +452,17 @@
           <label for="scriptCta">CALL TO ACTION</label>
           <input id="scriptCta" maxlength="500">
         </div>
-        <div class="panel-heading"><h2>Hindi voice setup</h2><span class="panel-kicker">GEMINI TTS</span></div>
+        <div class="panel-heading"><h2>Hindi voice setup</h2><span class="panel-kicker">GEMINI + VOICESTUDIO</span></div>
         <div class="modal-grid voice-settings">
+          <div class="modal-field">
+            <label for="voiceProvider">VOICE ENGINE</label>
+            <select id="voiceProvider">
+              <option value="gemini">Gemini Hindi TTS · Preset voices</option>
+              <option value="voicestudio">VoiceStudio · My cloned voice</option>
+            </select>
+          </div>
+        </div>
+        <div id="geminiVoiceFields" class="modal-grid voice-settings">
           <div class="modal-field">
             <label for="voiceMode">VOICE STYLE</label>
             <select id="voiceMode">
@@ -483,6 +492,32 @@
               <option value="Sadaltager">Sadaltager · Knowledgeable</option>
             </select>
           </div>
+        </div>
+        <div id="voiceStudioFields" class="modal-grid voice-settings" hidden>
+          <div class="modal-field">
+            <label for="voiceStudioProfile">MY CLONED VOICE</label>
+            <select id="voiceStudioProfile">
+              <option value="">Connect VoiceStudio to load saved profiles</option>
+            </select>
+            <button class="secondary-btn" id="refreshVoiceStudioProfilesBtn" type="button">Refresh voice profiles</button>
+          </div>
+          <div class="modal-field">
+            <label for="voiceMood">HINDI DELIVERY / EMOTION</label>
+            <select id="voiceMood">
+              <option value="natural">Natural · सहज</option>
+              <option value="calm">Calm · शांत</option>
+              <option value="spiritual">Spiritual · आध्यात्मिक</option>
+              <option value="serious">Serious · गंभीर</option>
+              <option value="emotional">Emotional · भावुक</option>
+              <option value="energetic">Energetic · जोशीला</option>
+              <option value="storytelling">Storytelling · कहानी</option>
+            </select>
+          </div>
+          <div class="modal-field">
+            <label for="voiceStudioStyle">CUSTOM DELIVERY INSTRUCTION · OPTIONAL</label>
+            <textarea id="voiceStudioStyle" rows="3" maxlength="1000" placeholder="उदाहरण: धीरे बोलें, मुख्य शब्दों पर हल्का जोर दें और वाक्यों के बीच स्वाभाविक विराम रखें।"></textarea>
+          </div>
+          <p class="privacy-note" id="voiceStudioStatus">VoiceStudio server configure होने के बाद आपकी saved cloned voice यहाँ दिखेगी।</p>
         </div>
         <p class="privacy-note" id="voiceModeNote">एक महिला आवाज़ पूरी narration बोलेगी।</p>
         <div class="panel-heading"><h2>Brand logo</h2><span class="panel-kicker">USED ON EVERY SLIDE</span></div>
@@ -1134,13 +1169,18 @@
         voiceover: document.getElementById("voiceoverText").value.trim(),
         cta: document.getElementById("scriptCta").value.trim()
       };
+      const voiceProvider = document.getElementById("voiceProvider").value;
+      const voiceProfileId = document.getElementById("voiceStudioProfile").value;
+      const voiceMood = document.getElementById("voiceMood").value;
+      const voiceStudioStyle = document.getElementById("voiceStudioStyle").value.trim();
       const voiceMode = document.getElementById("voiceMode").value;
       const femaleVoice = document.getElementById("femaleVoice").value;
       const maleVoice = document.getElementById("maleVoice").value;
+      const voicePreferences = { voiceProvider, voiceProfileId, voiceMood, voiceStudioStyle, voiceMode, femaleVoice, maleVoice };
       const patchResponse = await fetch("/api/jobs/" + encodeURIComponent(activeJobId), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scriptData: data, script: data.voiceover, voiceMode, femaleVoice, maleVoice })
+        body: JSON.stringify({ scriptData: data, script: data.voiceover, ...voicePreferences })
       });
       const savedJob = await patchResponse.json();
       if (!patchResponse.ok) throw new Error(savedJob.error || "Script save नहीं हुई।");
@@ -1151,7 +1191,7 @@
       const voiceResponse = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/generate-voice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ voiceover: data.voiceover, voiceMode, femaleVoice, maleVoice })
+        body: JSON.stringify({ voiceover: data.voiceover, ...voicePreferences })
       });
       const voiceResult = await voiceResponse.json();
       if (!voiceResponse.ok) throw new Error(voiceResult.error || "Hindi voice generate नहीं हुई।");
@@ -1729,10 +1769,15 @@
     refreshBufferPublishControls();
     renderSceneImageGallery(job.sceneImages || []);
     updateImageGenerationControls();
+    document.getElementById("voiceProvider").value = job.voiceProvider || "gemini";
+    document.getElementById("voiceStudioProfile").value = job.voiceProfileId || "";
+    document.getElementById("voiceMood").value = job.voiceMood || "calm";
+    document.getElementById("voiceStudioStyle").value = job.voiceStudioStyle || "";
     document.getElementById("voiceMode").value = job.voiceMode || "female";
     document.getElementById("femaleVoice").value = job.femaleVoice || "Kore";
     document.getElementById("maleVoice").value = job.maleVoice || "Orus";
     refreshVoiceModeFields();
+    if (job.voiceProvider === "voicestudio") loadVoiceStudioProfiles();
     drawSceneCards(activeScriptData?.scenes || []);
     voicePlayer.hidden = !job.voiceFile;
     if (job.voiceFile) voicePlayer.src = job.voiceFile + "?v=" + Date.now();
@@ -1972,24 +2017,78 @@
   }
 
   function refreshVoiceModeFields() {
+    const provider = document.getElementById("voiceProvider").value;
+    document.getElementById("geminiVoiceFields").hidden = provider !== "gemini";
+    document.getElementById("voiceStudioFields").hidden = provider !== "voicestudio";
+
     const mode = document.getElementById("voiceMode").value;
-    const femaleField = document.getElementById("femaleVoiceField");
-    const maleField = document.getElementById("maleVoiceField");
-    femaleField.hidden = mode === "male";
-    maleField.hidden = mode === "female";
+    document.getElementById("femaleVoiceField").hidden = mode === "male";
+    document.getElementById("maleVoiceField").hidden = mode === "female";
+
     const note = document.getElementById("voiceModeNote");
+    if (provider === "voicestudio") {
+      note.textContent = "आपकी चुनी हुई cloned voice से narration बनेगी। Delivery instructions VoxCPM2 को भेजी जाएँगी; वास्तविक भाव audio सुनकर जाँचें।";
+      return;
+    }
     const notes = {
       female: "एक महिला आवाज़ पूरी narration बोलेगी।",
-      male: "एक पुरुष आवाज़ पूरी narration बोलेगी।",
+      male: "एक पुरुष आवाज़ पूरी narration बोलेगा।",
       duet: "महिला और पुरुष आवाज़ बारी-बारी से संवाद बोलेंगे। Gemini दो speakers को एक audio track में बनाएगा।",
       mix: "महिला और पुरुष दोनों पूरी narration साथ बोलेंगे। दो audio generations होंगी; दोनों आवाज़ें एक WAV track में mix होंगी।"
     };
     note.textContent = notes[mode] || notes.female;
   }
 
+  async function loadVoiceStudioProfiles() {
+    const select = document.getElementById("voiceStudioProfile");
+    const status = document.getElementById("voiceStudioStatus");
+    const refreshButton = document.getElementById("refreshVoiceStudioProfilesBtn");
+    const selectedBeforeLoad = select.value || activeJob?.voiceProfileId || "";
+    refreshButton.disabled = true;
+    status.textContent = "VoiceStudio से saved voice profiles लोड हो रहे हैं…";
+    try {
+      const response = await fetch("/api/voice-studio/voices", { cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Voice profiles नहीं मिल पाए।");
+      const profiles = Array.isArray(result.profiles) ? result.profiles : [];
+      select.replaceChildren();
+      if (!profiles.length) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "No saved clone profiles";
+        select.appendChild(option);
+        status.textContent = "Connection ठीक है, लेकिन कोई saved clone profile नहीं मिली। VoiceStudio app में अपनी आवाज़ का profile बनाएँ और Refresh करें।";
+      } else {
+        for (const profile of profiles) {
+          const option = document.createElement("option");
+          option.value = profile.id;
+          option.textContent = profile.name + (profile.language ? " · " + profile.language : "");
+          select.appendChild(option);
+        }
+        select.value = profiles.some(profile => profile.id === selectedBeforeLoad)
+          ? selectedBeforeLoad
+          : profiles[0].id;
+        status.textContent = profiles.length + " saved voice profile(s) loaded. Selected profile cloned narration के लिए इस्तेमाल होगा।";
+      }
+    } catch (error) {
+      select.replaceChildren();
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "VoiceStudio connection unavailable";
+      select.appendChild(option);
+      status.textContent = error.message || "VoiceStudio connect नहीं हुआ। Server की .env settings जाँचें।";
+    } finally {
+      refreshButton.disabled = false;
+    }
+  }
+
   async function saveVoicePreferences(showStatus = false) {
     if (!activeJobId) return;
     const preferences = {
+      voiceProvider: document.getElementById("voiceProvider").value,
+      voiceProfileId: document.getElementById("voiceStudioProfile").value,
+      voiceMood: document.getElementById("voiceMood").value,
+      voiceStudioStyle: document.getElementById("voiceStudioStyle").value.trim(),
       voiceMode: document.getElementById("voiceMode").value,
       femaleVoice: document.getElementById("femaleVoice").value,
       maleVoice: document.getElementById("maleVoice").value
@@ -2023,13 +2122,18 @@
     const button = document.getElementById("generateVoiceBtn");
     button.disabled = true;
     button.textContent = "Generating voice…";
-    setStudioStatus("Gemini Hindi voice बना रहा है। इसमें थोड़ा समय लग सकता है…");
+    setStudioStatus(document.getElementById("voiceProvider").value === "voicestudio" ? "आपकी cloned Hindi voice तैयार हो रही है। इसमें थोड़ा समय लग सकता है…" : "Gemini Hindi voice बना रहा है। इसमें थोड़ा समय लग सकता है…");
     try {
+      await saveVoicePreferences(false);
       const response = await fetch("/api/jobs/" + encodeURIComponent(activeJobId) + "/generate-voice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           voiceover: document.getElementById("voiceoverText").value.trim(),
+          voiceProvider: document.getElementById("voiceProvider").value,
+          voiceProfileId: document.getElementById("voiceStudioProfile").value,
+          voiceMood: document.getElementById("voiceMood").value,
+          voiceStudioStyle: document.getElementById("voiceStudioStyle").value.trim(),
           voiceMode: document.getElementById("voiceMode").value,
           femaleVoice: document.getElementById("femaleVoice").value,
           maleVoice: document.getElementById("maleVoice").value
@@ -2578,6 +2682,15 @@
   document.getElementById("generateScriptBtn").addEventListener("click", () => generateScript(false));
   document.getElementById("convertScriptBtn").addEventListener("click", convertCurrentScriptToDevanagari);
   document.getElementById("saveScriptBtn").addEventListener("click", saveScriptEdits);
+  document.getElementById("voiceProvider").addEventListener("change", async () => {
+    refreshVoiceModeFields();
+    if (document.getElementById("voiceProvider").value === "voicestudio") await loadVoiceStudioProfiles();
+    await onVoiceSettingsChanged();
+  });
+  document.getElementById("voiceStudioProfile").addEventListener("change", onVoiceSettingsChanged);
+  document.getElementById("voiceMood").addEventListener("change", onVoiceSettingsChanged);
+  document.getElementById("voiceStudioStyle").addEventListener("change", onVoiceSettingsChanged);
+  document.getElementById("refreshVoiceStudioProfilesBtn").addEventListener("click", loadVoiceStudioProfiles);
   document.getElementById("voiceMode").addEventListener("change", onVoiceSettingsChanged);
   document.getElementById("femaleVoice").addEventListener("change", onVoiceSettingsChanged);
   document.getElementById("maleVoice").addEventListener("change", onVoiceSettingsChanged);
