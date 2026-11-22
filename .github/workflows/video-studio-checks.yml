@@ -28,6 +28,8 @@ jobs:
         run: npm install --ignore-scripts
       - name: Check server JavaScript syntax
         run: node --check src/server.js
+      - name: Check VoiceStudio deployment scripts
+        run: bash -n scripts/check-voice-studio-host.sh scripts/setup-voice-studio.sh
       - name: Check dashboard inline JavaScript syntax
         run: |
           node --input-type=module -e '
