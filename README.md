@@ -44,6 +44,27 @@ The Studio provides four modes:
 
 Female voice choices: Kore, Aoede, Leda, Zephyr and Gacrux. Male voice choices: Orus, Puck, Charon, Algieba and Sadaltager. The available voice names and gender labels come from Google's Gemini TTS voice list.
 
+### Your cloned Hindi voice with VoiceStudio
+
+The Studio can use a self-hosted [VoiceStudio](https://github.com/debpalash/VoiceStudio) server alongside Gemini TTS. This is an optional voice provider; the existing Gemini voice modes remain available.
+
+1. Install VoiceStudio on a computer or server with enough memory and storage for speech models. Enable the **VoxCPM2** engine in its Model Catalogue.
+2. In VoiceStudio, create a clone profile using your own clean voice recording and its transcript. Use another person's voice only with their clear permission.
+3. Confirm that VoiceStudio's API is reachable at `/v1/models` and `/v1/audio/voices`. The saved clone should appear as a profile in the voices response.
+4. Add the VoiceStudio connection to this Studio server's private `.env` file:
+
+```env
+VOICE_STUDIO_BASE_URL=https://your-voice-studio-host
+VOICE_STUDIO_API_KEY=your_voice_studio_server_key
+VOICE_STUDIO_MODEL=voxcpm2
+```
+
+For a VoiceStudio process on the same machine, `http://127.0.0.1:3900` can be used for `VOICE_STUDIO_BASE_URL`. Remote VoiceStudio connections must use HTTPS and a server API key. Never put the API key in browser code, GitHub, or chat. Restart Antardrishti, open Script Studio, choose **VoiceStudio · My cloned voice**, and refresh the voice profiles.
+
+Choose a saved clone and a delivery direction: Natural, Calm, Spiritual, Serious, Emotional, Energetic or Storytelling. An optional custom instruction can further guide the delivery. These are model instructions, not guaranteed emotion controls; listen to the generated Hindi audio and adjust the wording or reference recording when needed. VoiceStudio's TTS API accepts up to 4,096 characters per request, so longer narration must be shortened before using this provider. The Studio does not silently switch to Gemini if VoiceStudio is unavailable.
+
+VoiceStudio's application code is AGPL-3.0. The VoxCPM upstream repository is Apache-2.0, but review the license for the exact model weights and any other engine you enable before commercial use. Voice cloning should be limited to your own voice or recordings you are authorized to use.
+
 ### Brand logo
 
 - Open Script Studio and go to **Brand logo**.
