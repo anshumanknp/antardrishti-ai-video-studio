@@ -130,6 +130,7 @@ test("speech request uses selected clone, VoxCPM2, style instructions and WAV", 
   assert.equal(request.options.headers.get("Authorization"), "Bearer test-secret");
   assert.equal(request.body.model, "voxcpm2");
   assert.equal(request.body.voice, "profile123");
+  assert.equal(request.body.language, "hi");
   assert.equal(request.body.instructions, "Speak calmly and thoughtfully.");
   assert.equal(request.body.response_format, "wav");
   assert.equal(result.mimeType, "audio/wav");
