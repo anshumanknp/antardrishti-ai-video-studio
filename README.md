@@ -82,6 +82,15 @@ An x86_64 host is the preferred CPU deployment. The upstream project documents n
 
 After the container reports healthy, open VoiceStudio privately. From the server itself use `http://127.0.0.1:3900`. For access from another device, keep the port bound to loopback and use an SSH tunnel or a private Tailscale Serve connection; do not add a public firewall rule for port 3900.
 
+For Android access without opening a public port, install Tailscale on the Linux host and your phone, sign both into the same private tailnet, then run this on the host:
+
+```bash
+tailscale serve --bg --https=8443 http://127.0.0.1:3900
+tailscale serve status
+```
+
+Open the HTTPS address shown by `tailscale serve status` on the phone. VoiceStudio will ask for its server API key; read it locally on the host with `grep '^VOICE_STUDIO_API_KEY=' .env` and enter it only in the private VoiceStudio page. Do not send that value in chat or expose port 3900 in the cloud firewall.
+
 In VoiceStudio, create a clone profile using your own clean Hindi voice recording and its matching transcript. Use another person's voice only with their clear permission. The profile is stored in the persistent Docker volume `voicestudio-data`. VoiceStudio's API should then list it from `/v1/audio/voices`.
 
 In Antardrishti Script Studio, choose **VoiceStudio · My cloned voice**, refresh the profile list, select your clone and choose a delivery direction: Natural, Calm, Spiritual, Serious, Emotional, Energetic or Storytelling. An optional custom instruction can further guide the delivery. These are instructions to the model, not guaranteed emotion controls; listen to the Hindi sample and adjust the instructions or reference recording when needed.
