@@ -45,7 +45,7 @@ test("VoiceStudio config adds the OpenAI-compatible /v1 path", () => {
 
 test("VoiceStudio config accepts a complete /v1 URL and local HTTP", () => {
   assert.equal(
-    getVoiceStudioConfig({ VOICE_STUDIO_BASE_URL: "https://voice.example.test/v1/" }).baseUrl,
+    getVoiceStudioConfig({ VOICE_STUDIO_BASE_URL: "https://voice.example.test/v1/", VOICE_STUDIO_API_KEY: "test-secret" }).baseUrl,
     "https://voice.example.test/v1"
   );
   const local = getVoiceStudioConfig({ VOICE_STUDIO_BASE_URL: "http://127.0.0.1:3900" });
@@ -152,7 +152,7 @@ test("speech request rejects missing clone profile and excessive script length",
 test("malformed and truncated WAV responses are rejected", () => {
   assert.throws(() => inspectWav(Buffer.from("not audio")), /invalid WAV/);
   const wav = makeWav();
-  assert.throws(() => inspectWav(wav.subarray(0, 30)), /truncated WAV/);
+  assert.throws(() => inspectWav(wav.subarray(0, 44)), /truncated WAV/);
 });
 
 test("upstream failures return a safe, readable error without credentials", async () => {
