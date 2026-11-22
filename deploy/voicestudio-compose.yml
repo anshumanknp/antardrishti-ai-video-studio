@@ -4,7 +4,10 @@
 # that inference will be slower. See README.md before enabling it.
 services:
   voicestudio:
-    image: ghcr.io/debpalash/voicestudio:stable
+    image: antardrishti-voicestudio:local
+    build:
+      context: ..
+      dockerfile: deploy/voicestudio.Dockerfile
     container_name: antardrishti-voicestudio
     ports:
       # Keep the TTS API private on this host. Antardrishti calls it over loopback.
