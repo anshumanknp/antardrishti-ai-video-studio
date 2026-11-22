@@ -1,0 +1,32 @@
+# VoiceStudio sidecar for Antardrishti.
+# The upstream CPU image is linux/amd64. On ARM64, use AMD64 emulation only
+# after explicitly setting DOCKER_DEFAULT_PLATFORM=linux/amd64 and accepting
+# that inference will be slower. See README.md before enabling it.
+services:
+  voicestudio:
+    image: ghcr.io/debpalash/voicestudio:stable
+    container_name: antardrishti-voicestudio
+    ports:
+      # Keep the TTS API private on this host. Antardrishti calls it over loopback.
+      - "127.0.0.1:3900:3900"
+    volumes:
+      - voicestudio-data:/app/omnivoice_data
+    environment:
+      HF_HOME: /app/omnivoice_data/huggingface
+      OMNIVOICE_DATA_DIR: /app/omnivoice_data
+      OMNIVOICE_SERVER_MODE: "1"
+      OMNIVOICE_API_KEY: "${VOICE_STUDIO_API_KEY:?Run scripts/setup-voice-studio.sh to create the private API key}"
+      OMNIVOICE_TTS_BACKEND: voxcpm2
+      OMNIVOICE_VOXCPM_DEVICE: "${VOICE_STUDIO_VOXCPM_DEVICE:-cpu}"
+      PYTHONPATH: /app/backend
+      PYTHONUNBUFFERED: "1"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:3900/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+    restart: unless-stopped
+
+volumes:
+  voicestudio-data:
