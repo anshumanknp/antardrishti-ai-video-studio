@@ -149,10 +149,17 @@ export function buildServerRenderPlan(job, outputDir) {
 
 export function escapeFilterValue(value) {
   // FFmpeg's filtergraph parser treats backslashes as escape characters.
-  // Normalize Windows paths to forward slashes before escaping filter delimiters,
-  // so e.g. C:\\Users\\Name\\font.ttf becomes C\\:/Users/Name/font.ttf.
-  return String(value).replace(/\\\\/g, "/").replace(/:/g, "\\\\:").replace(/'/g, "\\\\'").replace(/,/g, "\\\\,")
-    .replace(/\\[/g, "\\\\[").replace(/\\]/g, "\\\\]").replace(/;/g, "\\\\;");
+  // Convert Windows separators to forward slashes, then escape filter delimiters.
+  // For example: C:\\Users\\Name\\font.ttf becomes C\\:/Users/Name/font.ttf.
+  const slash = String.fromCharCode(92);
+  const normalized = String(value).split(slash).join("/");
+  return normalized
+    .replace(/:/g, slash + ":")
+    .replace(/'/g, slash + "'")
+    .replace(/,/g, slash + ",")
+    .replace(/\\[/g, slash + "[")
+    .replace(/\\]/g, slash + "]")
+    .replace(/;/g, slash + ";");
 }
 
 function writeTextFile(filePath, value) {
