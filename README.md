@@ -44,6 +44,74 @@ The Studio provides four modes:
 
 Female voice choices: Kore, Aoede, Leda, Zephyr and Gacrux. Male voice choices: Orus, Puck, Charon, Algieba and Sadaltager. The available voice names and gender labels come from Google's Gemini TTS voice list.
 
+### Your cloned Hindi voice with VoiceStudio
+
+The Studio can use a self-hosted [VoiceStudio](https://github.com/debpalash/VoiceStudio) server alongside Gemini TTS. Gemini remains available as the default provider.
+
+#### Prepare the Oracle/Linux host
+
+The project includes a separate Docker sidecar for VoiceStudio. It keeps the TTS API bound to `127.0.0.1:3900`; the port is not opened to the public internet.
+
+1. Install Docker Engine with the Docker Compose v2 plugin on the same host that runs Antardrishti.
+2. Make sure Antardrishti already has a private `.env` file. Keep its existing Gemini, Cloudflare and Buffer settings.
+3. Check the server before downloading the image:
+
+```bash
+bash scripts/check-voice-studio-host.sh
+```
+
+4. Run the setup script:
+
+```bash
+bash scripts/setup-voice-studio.sh
+```
+
+The script creates a random `VOICE_STUDIO_API_KEY` in `.env` if one is not already present, sets the local VoiceStudio URL, builds a derived VoiceStudio image with `voxcpm>=2.0.3`, starts the container, and checks that the `voxcpm2` engine appears in its API model list. It never prints the key. The key is passed to VoiceStudio as `OMNIVOICE_API_KEY` and used by Antardrishti for server-to-server API calls. Restart the Antardrishti Node process after setup so it reloads the new `.env` values.
+
+The first VoxCPM2 generation downloads its multi-GB model checkpoint. CPU inference can be slow and memory-heavy; the host check warns below 16 GiB RAM and 15 GiB free disk. Those warning values are deployment precautions, not official minimum system requirements. Keep other memory-heavy services stopped during the first model load.
+
+**Oracle architecture warning:** the upstream VoiceStudio CPU Docker image currently publishes `linux/amd64`, not a native ARM64 CPU image. On an ARM64 Oracle instance, the setup script stops instead of silently starting an emulated container. Only proceed with emulation after accepting the performance cost:
+
+```bash
+VOICE_STUDIO_ALLOW_AMD64_EMULATION=1 bash scripts/setup-voice-studio.sh
+```
+
+An x86_64 host is the preferred CPU deployment. The upstream project documents native ARM64 only for supported NVIDIA GPU systems; Oracle Ampere ARM CPUs are not that configuration.
+
+#### Create your cloned voice
+
+After the container reports healthy, open VoiceStudio privately. From the server itself use `http://127.0.0.1:3900`. For access from another device, keep the port bound to loopback and use an SSH tunnel or a private Tailscale Serve connection; do not add a public firewall rule for port 3900.
+
+For Android access without opening a public port, install Tailscale on the Linux host and your phone, sign both into the same private tailnet, then run this on the host:
+
+```bash
+tailscale serve --bg --https=8443 http://127.0.0.1:3900
+tailscale serve status
+```
+
+Open the HTTPS address shown by `tailscale serve status` on the phone. VoiceStudio will ask for its server API key; read it locally on the host with `grep '^VOICE_STUDIO_API_KEY=' .env` and enter it only in the private VoiceStudio page. Do not send that value in chat or expose port 3900 in the cloud firewall.
+
+In VoiceStudio, create a clone profile using your own clean Hindi voice recording and its matching transcript. Use another person's voice only with their clear permission. The profile is stored in the persistent Docker volume `voicestudio-data`. VoiceStudio's API should then list it from `/v1/audio/voices`.
+
+In Antardrishti Script Studio, choose **VoiceStudio · My cloned voice**, refresh the profile list, select your clone and choose a delivery direction: Natural, Calm, Spiritual, Serious, Emotional, Energetic or Storytelling. An optional custom instruction can further guide the delivery. These are instructions to the model, not guaranteed emotion controls; listen to the Hindi sample and adjust the instructions or reference recording when needed.
+
+The integration sends Hindi language code `hi`, accepts WAV output and uses the real audio duration in the current video renderer. VoiceStudio's speech API accepts up to 4,096 characters per request, so shorten longer narration before selecting this provider. The Studio does not silently switch to Gemini if VoiceStudio is unavailable.
+
+To inspect the sidecar:
+
+```bash
+docker compose --env-file .env -f deploy/voicestudio-compose.yml ps
+docker compose --env-file .env -f deploy/voicestudio-compose.yml logs --tail=150
+```
+
+To stop it without deleting the saved clone or model cache:
+
+```bash
+docker compose --env-file .env -f deploy/voicestudio-compose.yml down
+```
+
+The source code of VoiceStudio is licensed AGPL-3.0. Review its network-use source obligations before offering a modified VoiceStudio instance as a public service. VoxCPM2 model weights and any additional models have their own terms; check the exact model card before commercial use. Voice cloning should be limited to your own voice or recordings you are authorized to use.
+
 ### Brand logo
 
 - Open Script Studio and go to **Brand logo**.
@@ -79,7 +147,7 @@ After Cloudflare is configured, open a video job and press **Auto Create Video (
 
 1. Generate a Hindi script in Devanagari if one does not exist.
 2. Save the reviewed script and the selected female, male or duet voice settings.
-3. Generate the Hindi narration audio through Gemini TTS.
+3. Generate Hindi narration through the selected provider: Gemini TTS or your self-hosted VoiceStudio clone.
 4. Generate missing scene images through Cloudflare Workers AI. Existing images are reused.
 5. Render the vertical video with the voice, scene images and Hindi subtitles, then prepare the separate SRT download.
 
@@ -172,7 +240,8 @@ Keep the token private. Do not paste it into chat or commit it to GitHub. The im
 ## API models and usage
 
 - Script, Duet dialogue and social copy: `gemini-3.8-flash` (the server automatically tries `gemini-3.1-flash-lite` and `gemini-3.5-flash-lite` when a temporary capacity error occurs).
-- Hindi narration: `gemini-3.1-flash-tts-preview` (Standard free tier).
+- Default Hindi narration: `gemini-3.1-flash-tts-preview` (Standard free tier).
+- Optional cloned Hindi narration: self-hosted VoiceStudio API with the VoxCPM2 engine and a saved voice profile.
 - Optional scene images: Cloudflare Workers AI `@cf/black-forest-labs/flux-1-schnell` (free allocation; requires a Cloudflare Account ID and Workers AI API token).
 - Duet uses Gemini's two-speaker TTS configuration.
 - Blend makes two TTS requests and mixes their PCM audio into one WAV.
@@ -209,6 +278,32 @@ The image gallery generates only missing planned assets and offers a separate **
 ## Content safety
 
 Avoid claims that hypnotherapy or past-life regression can diagnose, cure, or replace medical/mental-health care. Present guided exercises accurately and encourage qualified professional support where appropriate.
+
+## Mobile app installation
+
+The Dashboard and Publishing Centre can be installed as a Progressive Web App (PWA) when served over HTTPS (or localhost during development). Open the Studio in Chrome on Android and use the **Install App** prompt when it appears, or choose **Add to Home screen** from the browser menu.
+
+The service worker keeps only the public app shell available for offline opening. It deliberately does not cache API responses, generated videos, audio, images in `/outputs`, job records or other private data. Script generation, rendering, publishing and live Buffer sync still require a working server and internet connection.
+
+## Admin login and API security
+
+Set an administrator password and a private session secret in the local `.env` file before deploying publicly:
+
+```env
+ADMIN_PASSWORD=use-a-unique-password-at-least-12-characters
+ADMIN_SESSION_SECRET=use-a-random-secret-at-least-32-characters
+ADMIN_AUTH_REQUIRED=true
+```
+
+Generate a strong session secret with:
+
+```sh
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+```
+
+The dashboard and Publishing Centre show an admin login screen when authentication is enabled. The server protects every `/api` endpoint except the read-only health check and the login/session endpoints. Files under `/outputs` also require an authenticated session. State-changing API requests require a CSRF token and same-origin request checks. Login attempts are rate-limited. The session cookie is HttpOnly and SameSite=Strict; it is Secure in production.
+
+Production mode fails closed when the admin password or session secret is missing or too short. Local development remains available without login unless `ADMIN_AUTH_REQUIRED=true` or valid admin credentials are configured. Sessions are held in server memory and expire after 12 hours; a server restart signs the user out. Use HTTPS in production and keep both values out of GitHub.
 
 ## Security
 

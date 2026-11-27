@@ -1,0 +1,52 @@
+{
+  "id": "/",
+  "name": "Antardrishti AI Video Studio",
+  "short_name": "Antardrishti",
+  "description": "Hindi-first AI video production and publishing studio.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d1421",
+  "theme_color": "#101827",
+  "categories": [
+    "productivity",
+    "video"
+  ],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "description": "Open the Antardrishti video production dashboard",
+      "url": "/",
+      "icons": [
+        {
+          "src": "/icon.svg",
+          "sizes": "any",
+          "type": "image/svg+xml"
+        }
+      ]
+    },
+    {
+      "name": "Publishing Centre",
+      "short_name": "Publishing",
+      "description": "Open Buffer publishing calendar and records",
+      "url": "/publishing.html",
+      "icons": [
+        {
+          "src": "/icon.svg",
+          "sizes": "any",
+          "type": "image/svg+xml"
+        }
+      ]
+    }
+  ]
+}

@@ -3,6 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
+import { createAuthSecurity } from "./auth.js";
+import { spawnSync } from "node:child_process";
 import { readJobs as readJobStore, writeJobs as writeJobStore } from "./job-store.js";
 import { getRecommendedSceneCount, preserveSceneProductionFields, validateScriptData } from "./script-validation.js";
 import { buildCloudflareScenePrompt } from "./image-prompt.js";
@@ -10,7 +12,10 @@ import { getAlternateShotType, getVideoVisualPlan, getVisualImageTargets } from 
 import { classifyCloudflareImageError } from "./cloudflare-errors.js";
 import { buildBufferVideoPostInput, validatePublicVideoUrl, validateScheduledAt } from "./buffer-api.js";
 import { buildRenderedVideoFileName, getRenderedVideoExtension } from "./rendered-video.js";
+import { enqueueRenderTask, readRenderQueue, recoverInterruptedRenderTasks, claimNextRenderTask, updateRenderTask } from "./render-queue.js";
+import { renderServerVideo } from "./server-renderer.js";
 import { assertBufferPublishAllowed, recordBufferQueuePost, resetBufferApprovalIfContentChanged } from "./publishing-guard.js";
+import { generateVoiceStudioSpeech, getVoiceStudioStatus, listVoiceStudioProfiles } from "./voice-studio-api.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -37,6 +42,9 @@ const PORT = Number(process.env.PORT || 3460);
 const DATA_DIR = path.join(__dirname, "..", "data");
 const OUTPUT_DIR = path.join(__dirname, "..", "outputs");
 const JOBS_FILE = path.join(DATA_DIR, "jobs.json");
+const RENDER_QUEUE_FILE = path.join(DATA_DIR, "render-queue.json");
+const FFMPEG_PATH = process.env.FFMPEG_PATH || "ffmpeg";
+const ANTARDRISHTI_FONT_FILE = process.env.ANTARDRISHTI_FONT_FILE || "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf";
 const BRAND_LOGO_META_FILE = path.join(DATA_DIR, "brand-logo.json");
 const GEMINI_TEXT_MODEL = "gemini-3.8-flash";
 const GEMINI_TTS_MODEL = process.env.GEMINI_TTS_MODEL || "gemini-3.1-flash-tts-preview";
@@ -55,20 +63,61 @@ const FEMALE_TTS_VOICES = new Set(["Kore", "Aoede", "Leda", "Zephyr", "Gacrux"])
 const MALE_TTS_VOICES = new Set(["Orus", "Puck", "Charon", "Algieba", "Sadaltager"]);
 const DEFAULT_FEMALE_VOICE = "Kore";
 const DEFAULT_MALE_VOICE = "Orus";
+const VOICE_STUDIO_MOODS = {
+  natural: { label: "Natural / सहज", direction: "Speak natural Indian Hindi in a conversational, clear and warm voice. Keep the pace balanced and avoid artificial overacting." },
+  calm: { label: "Calm / शांत", direction: "Speak natural Indian Hindi in a calm, meditative and reassuring delivery. Use gentle pacing, soft emphasis and natural pauses." },
+  spiritual: { label: "Spiritual / आध्यात्मिक", direction: "Speak natural Indian Hindi like a thoughtful spiritual discourse. Use a serene, contemplative and dignified delivery, measured pacing and gentle emphasis." },
+  serious: { label: "Serious / गंभीर", direction: "Speak natural Indian Hindi with a serious, confident and authoritative delivery. Keep the tone composed, clear and persuasive without shouting." },
+  emotional: { label: "Emotional / भावुक", direction: "Speak natural Indian Hindi with a sensitive, heartfelt and emotionally warm delivery. Let key phrases carry feeling without melodrama." },
+  energetic: { label: "Energetic / जोशीला", direction: "Speak natural Indian Hindi with lively energy, clear articulation and positive momentum. Emphasize key words while keeping the delivery natural." },
+  storytelling: { label: "Storytelling / कहानी", direction: "Speak natural Indian Hindi like an engaging storyteller. Use expressive intonation, varied pacing and meaningful pauses to hold attention." }
+};
+
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 if (!fs.existsSync(JOBS_FILE)) fs.writeFileSync(JOBS_FILE, "[]", "utf8");
 
+if (!fs.existsSync(RENDER_QUEUE_FILE)) fs.writeFileSync(RENDER_QUEUE_FILE, "[]", "utf8");
+const recoveredRenderTasks = recoverInterruptedRenderTasks(RENDER_QUEUE_FILE);
+if (recoveredRenderTasks) {
+  const recoveredJobs = readJobs();
+  let changed = false;
+  for (const task of readRenderQueue(RENDER_QUEUE_FILE).filter(item => item.status === "queued" && item.recoveredAt)) {
+    const job = recoveredJobs.find(item => item.id === task.jobId);
+    if (!job || job.renderTaskId !== task.id || job.renderStatus !== "processing") continue;
+    job.renderStatus = "queued";
+    job.renderProgress = 0;
+    job.renderStage = task.stage;
+    job.updatedAt = new Date().toISOString();
+    changed = true;
+  }
+  if (changed) writeJobs(recoveredJobs);
+}
+
+
 app.use(express.json({ limit: "3mb" }));
 app.use(express.static(path.join(__dirname, "..", "public")));
-app.use("/outputs", express.static(OUTPUT_DIR));
+
+const authSecurity = createAuthSecurity({
+  adminPassword: process.env.ADMIN_PASSWORD || "",
+  sessionSecret: process.env.ADMIN_SESSION_SECRET || "",
+  required: process.env.NODE_ENV === "production" || process.env.ADMIN_AUTH_REQUIRED === "true",
+  secureCookies: process.env.NODE_ENV === "production"
+});
+
+app.get("/api/auth/session", authSecurity.sessionStatus);
+app.post("/api/auth/login", authSecurity.login);
+app.post("/api/auth/logout", authSecurity.logout);
+app.use("/api", authSecurity.apiMiddleware);
+app.use("/outputs", authSecurity.outputsMiddleware, express.static(OUTPUT_DIR));
 
 function readJobs() { return readJobStore(JOBS_FILE); }
 function writeJobs(jobs) { return writeJobStore(JOBS_FILE, jobs); }
 function removeSavedRenderedVideo(job) {
   if (!job?.renderedVideoFile) return;
   fs.rmSync(path.join(OUTPUT_DIR, path.basename(job.renderedVideoFile)), { force: true });
+  if (job.renderedSubtitleFile) fs.rmSync(path.join(OUTPUT_DIR, path.basename(job.renderedSubtitleFile)), { force: true });
 }
 
 function pcmToWav(pcm, sampleRate = 24000, channels = 1, bitsPerSample = 16) {
@@ -366,6 +415,137 @@ function findJob(id) {
   }
   return { jobs, job };
 }
+
+function isServerRenderingAvailable() {
+  const probe = spawnSync(FFMPEG_PATH, ["-version"], { stdio: "ignore", timeout: 5000 });
+  return !probe.error && probe.status === 0 && fs.existsSync(ANTARDRISHTI_FONT_FILE);
+}
+
+function getBrandLogoPath() {
+  try {
+    const logo = JSON.parse(fs.readFileSync(BRAND_LOGO_META_FILE, "utf8"));
+    const fileName = path.basename(String(logo?.fileName || ""));
+    if (!fileName || fileName !== logo.fileName) return null;
+    const filePath = path.join(OUTPUT_DIR, fileName);
+    return fs.existsSync(filePath) ? filePath : null;
+  } catch {
+    return null;
+  }
+}
+
+function renderSourceSignature(job) {
+  return JSON.stringify({
+    id: job.id,
+    duration: job.duration,
+    script: job.script,
+    scriptData: job.scriptData,
+    sceneImages: job.sceneImages,
+    voiceFile: job.voiceFile
+  });
+}
+
+let renderWorkerBusy = false;
+
+async function processNextRenderTask() {
+  if (renderWorkerBusy || !isServerRenderingAvailable()) return;
+  const task = claimNextRenderTask(RENDER_QUEUE_FILE);
+  if (!task) return;
+  renderWorkerBusy = true;
+
+  try {
+    const { job } = findJob(task.jobId);
+    if (!job) {
+      updateRenderTask(RENDER_QUEUE_FILE, task.id, {
+        status: "failed",
+        stage: "Video job no longer exists",
+        error: "इस video job को delete कर दिया गया है।",
+        completedAt: new Date().toISOString()
+      });
+      return;
+    }
+
+    const sourceSignature = renderSourceSignature(job);
+    const jobsAtStart = readJobs();
+    const currentAtStart = jobsAtStart.find(item => item.id === task.jobId);
+    if (currentAtStart) {
+      currentAtStart.renderStatus = "processing";
+      currentAtStart.renderProgress = 1;
+      currentAtStart.renderStage = "Preparing video assets";
+      currentAtStart.renderError = "";
+      currentAtStart.renderTaskId = task.id;
+      currentAtStart.updatedAt = new Date().toISOString();
+      writeJobs(jobsAtStart);
+    }
+
+    const result = await renderServerVideo({
+      job,
+      outputDir: OUTPUT_DIR,
+      brandLogoPath: getBrandLogoPath(),
+      ffmpegPath: FFMPEG_PATH,
+      fontFile: ANTARDRISHTI_FONT_FILE,
+      onProgress: (progress, stage) => {
+        updateRenderTask(RENDER_QUEUE_FILE, task.id, { progress, stage });
+        const progressJobs = readJobs();
+        const progressJob = progressJobs.find(item => item.id === task.jobId);
+        if (progressJob) {
+          progressJob.renderStatus = "processing";
+          progressJob.renderProgress = progress;
+          progressJob.renderStage = stage || "Rendering MP4 on Oracle Cloud";
+          progressJob.updatedAt = new Date().toISOString();
+          writeJobs(progressJobs);
+        }
+      }
+    });
+
+    const latestJobs = readJobs();
+    const latestJob = latestJobs.find(item => item.id === task.jobId);
+    if (!latestJob || renderSourceSignature(latestJob) !== sourceSignature) {
+      fs.rmSync(path.join(OUTPUT_DIR, result.videoFile), { force: true });
+      fs.rmSync(path.join(OUTPUT_DIR, result.subtitleFile), { force: true });
+      throw new Error("Render के दौरान script, voice या scene images बदल गईं। नई content के साथ दोबारा render करें।");
+    }
+
+    latestJob.renderedVideoFile = result.videoFile;
+    latestJob.renderedVideoMimeType = result.mimeType;
+    latestJob.renderedVideoSizeBytes = result.sizeBytes;
+    latestJob.renderedVideoSavedAt = new Date().toISOString();
+    latestJob.renderedSubtitleFile = result.subtitleFile;
+    latestJob.renderStatus = "completed";
+    latestJob.renderProgress = 100;
+    latestJob.renderStage = "Video ready";
+    latestJob.renderError = "";
+    latestJob.updatedAt = new Date().toISOString();
+    writeJobs(latestJobs);
+
+    updateRenderTask(RENDER_QUEUE_FILE, task.id, {
+      status: "completed",
+      stage: "Video ready",
+      progress: 100,
+      outputFile: result.videoFile,
+      completedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    const failureJobs = readJobs();
+    const failureJob = failureJobs.find(item => item.id === task.jobId);
+    if (failureJob) {
+      failureJob.renderStatus = "failed";
+      failureJob.renderError = String(error?.message || "Server rendering failed.").slice(0, 1000);
+      failureJob.renderStage = "Render failed";
+      failureJob.updatedAt = new Date().toISOString();
+      writeJobs(failureJobs);
+    }
+    updateRenderTask(RENDER_QUEUE_FILE, task.id, {
+      status: "failed",
+      stage: "Render failed",
+      error: String(error?.message || "Server rendering failed.").slice(0, 1000),
+      completedAt: new Date().toISOString()
+    });
+    console.error("[server-render] " + (error?.message || "Unknown rendering error"));
+  } finally {
+    renderWorkerBusy = false;
+  }
+}
+
 
 app.get("/api/health", (_req, res) => {
   const imageUsageToday = readImageUsage().count;
@@ -1303,6 +1483,64 @@ app.delete("/api/brand/logo", (_req, res) => {
   res.json({ ok: true });
 });
 
+
+app.get("/api/voice-studio/status", async (_req, res) => {
+  const status = await getVoiceStudioStatus();
+  res.json(status);
+});
+
+app.get("/api/voice-studio/voices", async (_req, res) => {
+  try {
+    const profiles = await listVoiceStudioProfiles();
+    res.json({ ok: true, profiles });
+  } catch (error) {
+    res.status(error.status || 502).json({ error: error.message || "VoiceStudio profiles load नहीं हो पाए।" });
+  }
+});
+
+app.get("/api/rendering/mode", (_req, res) => {
+  const serverSideAvailable = isServerRenderingAvailable();
+  res.json({
+    serverSideAvailable,
+    engine: serverSideAvailable ? "ffmpeg" : "browser",
+    message: serverSideAvailable
+      ? "Server-side FFmpeg rendering is ready."
+      : "Server FFmpeg या Hindi font उपलब्ध नहीं है; इस machine पर browser rendering इस्तेमाल होगी."
+  });
+});
+
+app.post("/api/jobs/:id/render", (req, res) => {
+  if (!isServerRenderingAvailable()) {
+    return res.status(503).json({ error: "Server-side rendering अभी उपलब्ध नहीं है। Oracle पर FFmpeg और Noto Sans Devanagari install करें।" });
+  }
+  const { jobs, job } = findJob(req.params.id);
+  if (!job) return res.status(404).json({ error: "Video brief not found." });
+  if (!job.scriptData?.scenes?.length) {
+    return res.status(400).json({ error: "पहले Hindi script और scene plan तैयार करें।" });
+  }
+  try {
+    const queued = enqueueRenderTask(RENDER_QUEUE_FILE, job.id);
+    job.renderStatus = queued.task.status;
+    job.renderTaskId = queued.task.id;
+    job.renderProgress = queued.task.progress;
+    job.renderStage = queued.task.stage;
+    job.renderError = "";
+    job.updatedAt = new Date().toISOString();
+    writeJobs(jobs);
+    res.status(202).json({ ok: true, created: queued.created, task: queued.task, job });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Render queue में video add नहीं हो पाई।" });
+  }
+});
+
+app.get("/api/jobs/:id/render-status", (req, res) => {
+  const { job } = findJob(req.params.id);
+  if (!job) return res.status(404).json({ error: "Video brief not found." });
+  const tasks = readRenderQueue(RENDER_QUEUE_FILE).filter(task => task.jobId === job.id);
+  const task = tasks.at(-1) || null;
+  res.json({ ok: true, task, job });
+});
+
 app.get("/api/jobs", (_req, res) => {
   const jobs = readJobs().map(job => ({
     ...job,
@@ -1339,6 +1577,10 @@ app.post("/api/jobs", (req, res) => {
     voiceMode: "female",
     femaleVoice: DEFAULT_FEMALE_VOICE,
     maleVoice: DEFAULT_MALE_VOICE,
+    voiceProvider: "gemini",
+    voiceProfileId: "",
+    voiceMood: "calm",
+    voiceStudioStyle: "",
     videoFile: "",
     platforms: ["Instagram", "Facebook", "YouTube Shorts"],
     approvalRequired: true,
@@ -1845,6 +2087,18 @@ app.post("/api/jobs/:id/generate-voice", async (req, res) => {
   if (!narration) return res.status(400).json({ error: "पहले Hindi script generate करें।" });
   if (narration.length > 12000) return res.status(400).json({ error: "Voiceover 12,000 characters से छोटा रखें।" });
 
+  const voiceProvider = ["gemini", "voicestudio"].includes(req.body?.voiceProvider)
+    ? req.body.voiceProvider
+    : ["gemini", "voicestudio"].includes(job.voiceProvider) ? job.voiceProvider : "gemini";
+  const voiceProfileId = typeof req.body?.voiceProfileId === "string"
+    ? req.body.voiceProfileId.trim().slice(0, 64)
+    : String(job.voiceProfileId || "").slice(0, 64);
+  const voiceMood = Object.hasOwn(VOICE_STUDIO_MOODS, req.body?.voiceMood)
+    ? req.body.voiceMood
+    : Object.hasOwn(VOICE_STUDIO_MOODS, job.voiceMood) ? job.voiceMood : "calm";
+  const voiceStudioStyle = typeof req.body?.voiceStudioStyle === "string"
+    ? req.body.voiceStudioStyle.trim().slice(0, 1000)
+    : String(job.voiceStudioStyle || "").slice(0, 1000);
   const allowedModes = new Set(["female", "male", "duet", "mix"]);
   const voiceMode = allowedModes.has(req.body?.voiceMode) ? req.body.voiceMode
     : allowedModes.has(job.voiceMode) ? job.voiceMode : "female";
@@ -1854,112 +2108,125 @@ app.post("/api/jobs/:id/generate-voice", async (req, res) => {
     : MALE_TTS_VOICES.has(job.maleVoice) ? job.maleVoice : DEFAULT_MALE_VOICE;
 
   try {
+    let wav;
     let pcm;
+    let audioDurationSec;
     let voiceModeLabel = "Female narrator";
 
-    if (voiceMode === "female" || voiceMode === "male") {
-      const voiceName = voiceMode === "female" ? femaleVoice : maleVoice;
-      pcm = await generateGeminiTtsPcm(
-        "Speak the following script in natural, warm, clear Indian Hindi. Use a calm, friendly educational narrator style, medium pace, and accurate Hindi pronunciation. Preserve the words; do not translate or add an introduction.\n\n" + narration,
-        { voiceConfig: { prebuiltVoiceConfig: { voiceName } } }
-      );
-      voiceModeLabel = voiceMode === "female" ? "Female narrator · " + voiceName : "Male narrator · " + voiceName;
-    } else if (voiceMode === "duet") {
-      const dialogueSchema = {
-        type: "object",
-        properties: {
-          turns: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                speaker: { type: "string", enum: ["Female", "Male"] },
-                text: { type: "string" }
-              },
-              required: ["speaker", "text"]
-            }
-          }
-        },
-        required: ["turns"]
-      };
-      const dialoguePayload = await callGemini({
-        model: GEMINI_TEXT_MODEL,
-        input: [
-          "Convert the following Hindi narration into a natural two-person spoken conversation for a short educational video.",
-          "Create 6 to 8 concise turns. Alternate speakers, starting with Female, then Male. Use only the speaker labels Female and Male.",
-          "Preserve every main idea and factual meaning. Do not add claims, statistics, advice or new information. Do not omit the main takeaway or call to action.",
-          "Each turn's spoken text must be natural Hindi in Devanagari script. Never write Roman Hindi. Keep genuinely English words only when needed.",
-          "Return JSON only with a turns array matching the schema.",
-          "NARRATION:", narration
-        ].join("\n"),
-        response_format: { type: "text", mime_type: "application/json", schema: dialogueSchema },
-        generation_config: { max_output_tokens: 1200 }
-      });
-      let dialogue;
-      try { dialogue = JSON.parse(getModelText(dialoguePayload)); }
-      catch {
-        return res.status(502).json({ error: "Duet dialogue तैयार नहीं हो पाया। फिर कोशिश करें।" });
-      }
-      const turns = Array.isArray(dialogue?.turns) ? dialogue.turns : [];
-      if (turns.length < 4 || turns.length > 10 || turns.some(turn =>
-        !["Female", "Male"].includes(turn.speaker) ||
-        typeof turn.text !== "string" || !turn.text.trim()
-      )) {
-        return res.status(502).json({ error: "Duet dialogue में speaker turns सही नहीं मिले। फिर कोशिश करें।" });
-      }
-      const languageIssues = [];
-      turns.forEach((turn, index) => {
-        const probe = {
-          title: "जाँच",
-          hook: "जाँच",
-          voiceover: turn.text,
-          cta: "जाँच",
-          scenes: []
-        };
-        if (devanagariIssues(probe).length) languageIssues.push(index + 1);
-      });
-      if (languageIssues.length) {
-        return res.status(422).json({ error: "Duet dialogue में कुछ Roman Hindi text मिला। फिर कोशिश करें।" });
-      }
-
-      const dialogueText = [
-        "TTS the following natural Hindi conversation between a female and a male speaker.",
-        "Use a calm, clear, warm Indian Hindi delivery. Speak only the words after each speaker label. Do not read the labels aloud.",
-        ...turns.map(turn => turn.speaker + ": " + turn.text)
-      ].join("\n");
-      pcm = await generateGeminiTtsPcm(dialogueText, {
-        multiSpeakerVoiceConfig: {
-          speakerVoiceConfigs: [
-            { speaker: "Female", voiceConfig: { prebuiltVoiceConfig: { voiceName: femaleVoice } } },
-            { speaker: "Male", voiceConfig: { prebuiltVoiceConfig: { voiceName: maleVoice } } }
-          ]
-        }
-      });
-      job.voiceoverTurns = turns;
-      voiceModeLabel = "Duet · " + femaleVoice + " + " + maleVoice;
+    if (voiceProvider === "voicestudio") {
+      const mood = VOICE_STUDIO_MOODS[voiceMood] || VOICE_STUDIO_MOODS.calm;
+      const instructions = [
+        mood.direction,
+        voiceStudioStyle ? "Additional delivery direction: " + voiceStudioStyle : "",
+        "Speak only the supplied Hindi narration. Preserve its meaning and wording. Do not translate, add an introduction or omit any sentence. Keep the selected cloned speaker's identity."
+      ].filter(Boolean).join("\n\n");
+      const speech = await generateVoiceStudioSpeech({ text: narration, voiceId: voiceProfileId, instructions });
+      wav = speech.buffer;
+      audioDurationSec = speech.durationSec;
+      voiceModeLabel = "My cloned voice · VoxCPM2 · " + mood.label;
+      job.voiceProvider = voiceProvider;
+      job.voiceProfileId = voiceProfileId;
+      job.voiceMood = voiceMood;
+      job.voiceStudioStyle = voiceStudioStyle;
     } else {
-      const [femalePcm, malePcm] = await Promise.all([
-        generateGeminiTtsPcm(
-          "Speak the following Hindi script in a calm, warm, clear Indian Hindi narrator style. Preserve the words exactly.\n\n" + narration,
-          { voiceConfig: { prebuiltVoiceConfig: { voiceName: femaleVoice } } }
-        ),
-        generateGeminiTtsPcm(
-          "Speak the following Hindi script in a calm, warm, clear Indian Hindi narrator style. Preserve the words exactly.\n\n" + narration,
-          { voiceConfig: { prebuiltVoiceConfig: { voiceName: maleVoice } } }
-        )
-      ]);
-      // Female voice is foreground; male voice is mixed underneath at a lower level.
-      pcm = mixPcmMono(femalePcm, malePcm, 0.72, 0.28);
-      voiceModeLabel = "Blended voices · " + femaleVoice + " + " + maleVoice;
+      if (voiceMode === "female" || voiceMode === "male") {
+        const voiceName = voiceMode === "female" ? femaleVoice : maleVoice;
+        pcm = await generateGeminiTtsPcm(
+          "Speak the following script in natural, warm, clear Indian Hindi. Use a calm, friendly educational narrator style, medium pace, and accurate Hindi pronunciation. Preserve the words; do not translate or add an introduction.\n\n" + narration,
+          { voiceConfig: { prebuiltVoiceConfig: { voiceName } } }
+        );
+        voiceModeLabel = voiceMode === "female" ? "Female narrator · " + voiceName : "Male narrator · " + voiceName;
+      } else if (voiceMode === "duet") {
+        const dialogueSchema = {
+          type: "object",
+          properties: {
+            turns: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  speaker: { type: "string", enum: ["Female", "Male"] },
+                  text: { type: "string" }
+                },
+                required: ["speaker", "text"]
+              }
+            }
+          },
+          required: ["turns"]
+        };
+        const dialoguePayload = await callGemini({
+          model: GEMINI_TEXT_MODEL,
+          input: [
+            "Convert the following Hindi narration into a natural two-person spoken conversation for a short educational video.",
+            "Create 6 to 8 concise turns. Alternate speakers, starting with Female, then Male. Use only the speaker labels Female and Male.",
+            "Preserve every main idea and factual meaning. Do not add claims, statistics, advice or new information. Do not omit the main takeaway or call to action.",
+            "Each turn's spoken text must be natural Hindi in Devanagari script. Never write Roman Hindi. Keep genuinely English words only when needed.",
+            "Return JSON only with a turns array matching the schema.",
+            "NARRATION:", narration
+          ].join("\n"),
+          response_format: { type: "text", mime_type: "application/json", schema: dialogueSchema },
+          generation_config: { max_output_tokens: 1200 }
+        });
+        let dialogue;
+        try { dialogue = JSON.parse(getModelText(dialoguePayload)); }
+        catch {
+          return res.status(502).json({ error: "Duet dialogue तैयार नहीं हो पाया। फिर कोशिश करें।" });
+        }
+        const turns = Array.isArray(dialogue?.turns) ? dialogue.turns : [];
+        if (turns.length < 4 || turns.length > 10 || turns.some(turn =>
+          !["Female", "Male"].includes(turn.speaker) ||
+          typeof turn.text !== "string" || !turn.text.trim()
+        )) {
+          return res.status(502).json({ error: "Duet dialogue में speaker turns सही नहीं मिले। फिर कोशिश करें।" });
+        }
+        const languageIssues = [];
+        turns.forEach((turn, index) => {
+          const probe = { title: "जाँच", hook: "जाँच", voiceover: turn.text, cta: "जाँच", scenes: [] };
+          if (devanagariIssues(probe).length) languageIssues.push(index + 1);
+        });
+        if (languageIssues.length) {
+          return res.status(422).json({ error: "Duet dialogue में कुछ Roman Hindi text मिला। फिर कोशिश करें।" });
+        }
+
+        const dialogueText = [
+          "TTS the following natural Hindi conversation between a female and a male speaker.",
+          "Use a calm, clear, warm Indian Hindi delivery. Speak only the words after each speaker label. Do not read the labels aloud.",
+          ...turns.map(turn => turn.speaker + ": " + turn.text)
+        ].join("\n");
+        pcm = await generateGeminiTtsPcm(dialogueText, {
+          multiSpeakerVoiceConfig: {
+            speakerVoiceConfigs: [
+              { speaker: "Female", voiceConfig: { prebuiltVoiceConfig: { voiceName: femaleVoice } } },
+              { speaker: "Male", voiceConfig: { prebuiltVoiceConfig: { voiceName: maleVoice } } }
+            ]
+          }
+        });
+        job.voiceoverTurns = turns;
+        voiceModeLabel = "Duet · " + femaleVoice + " + " + maleVoice;
+      } else {
+        const [femalePcm, malePcm] = await Promise.all([
+          generateGeminiTtsPcm(
+            "Speak the following Hindi script in a calm, warm, clear Indian Hindi narrator style. Preserve the words exactly.\n\n" + narration,
+            { voiceConfig: { prebuiltVoiceConfig: { voiceName: femaleVoice } } }
+          ),
+          generateGeminiTtsPcm(
+            "Speak the following Hindi script in a calm, warm, clear Indian Hindi narrator style. Preserve the words exactly.\n\n" + narration,
+            { voiceConfig: { prebuiltVoiceConfig: { voiceName: maleVoice } } }
+          )
+        ]);
+        pcm = mixPcmMono(femalePcm, malePcm, 0.72, 0.28);
+        voiceModeLabel = "Blended voices · " + femaleVoice + " + " + maleVoice;
+      }
+      audioDurationSec = pcm.length / (24000 * 2);
+      wav = pcmToWav(pcm, 24000);
+      job.voiceProvider = "gemini";
     }
 
-    const audioDurationSec = pcm.length / (24000 * 2);
     const targetDurationSec = Number(job.duration || 45);
     const durationToleranceSec = Math.max(2, targetDurationSec * 0.08);
     const durationMatchesTarget =
       audioDurationSec >= targetDurationSec - durationToleranceSec &&
       audioDurationSec <= targetDurationSec + 0.05;
-    const wav = pcmToWav(pcm, 24000);
     const safeFile = job.id + ".wav";
     fs.writeFileSync(path.join(OUTPUT_DIR, safeFile), wav);
     job.script = narration;
@@ -1979,6 +2246,7 @@ app.post("/api/jobs/:id/generate-voice", async (req, res) => {
       ok: true,
       voiceFile: job.voiceFile,
       mimeType: "audio/wav",
+      voiceProvider,
       voiceMode: job.voiceMode,
       voiceModeLabel,
       audioDurationSec: job.voiceDurationSec,
@@ -1990,27 +2258,9 @@ app.post("/api/jobs/:id/generate-voice", async (req, res) => {
     res.status(error.status || 502).json({
       error: error.name === "TimeoutError" || error.name === "AbortError"
         ? "Voice generation में समय लग गया। फिर कोशिश करें।"
-        : error.message || "Gemini TTS से connect नहीं हो पाया।"
+        : error.message || "Hindi Voice Engine से connect नहीं हो पाया।"
     });
   }
-});
-
-app.delete("/api/jobs/:id", (req, res) => {
-  const jobs = readJobs();
-  const index = jobs.findIndex(item => item.id === req.params.id);
-  if (index === -1) return res.status(404).json({ error: "Video brief not found." });
-  const [deletedJob] = jobs.splice(index, 1);
-  writeJobs(jobs);
-  try {
-    if (deletedJob.voiceFile) fs.rmSync(path.join(OUTPUT_DIR, path.basename(deletedJob.voiceFile)), { force: true });
-    for (const extension of ["mp4", "webm"]) {
-      fs.rmSync(path.join(OUTPUT_DIR, buildRenderedVideoFileName(deletedJob.id, extension)), { force: true });
-    }
-    for (const image of deletedJob.sceneImages || []) {
-      if (image.url) fs.rmSync(path.join(OUTPUT_DIR, path.basename(image.url)), { force: true });
-    }
-  } catch { /* Ignore optional media cleanup errors. */ }
-  res.json({ ok: true, deletedId: deletedJob.id });
 });
 
 app.patch("/api/jobs/:id", (req, res) => {
@@ -2046,6 +2296,12 @@ app.patch("/api/jobs/:id", (req, res) => {
     job.platformCopy = copy;
   }
   if (["female", "male", "duet", "mix"].includes(req.body?.voiceMode)) job.voiceMode = req.body.voiceMode;
+  if (["gemini", "voicestudio"].includes(req.body?.voiceProvider)) job.voiceProvider = req.body.voiceProvider;
+  if (typeof req.body?.voiceProfileId === "string" && /^[a-zA-Z0-9_-]{0,64}$/.test(req.body.voiceProfileId.trim())) {
+    job.voiceProfileId = req.body.voiceProfileId.trim();
+  }
+  if (Object.hasOwn(VOICE_STUDIO_MOODS, req.body?.voiceMood)) job.voiceMood = req.body.voiceMood;
+  if (typeof req.body?.voiceStudioStyle === "string") job.voiceStudioStyle = req.body.voiceStudioStyle.trim().slice(0, 1000);
   if (FEMALE_TTS_VOICES.has(req.body?.femaleVoice)) job.femaleVoice = req.body.femaleVoice;
   if (MALE_TTS_VOICES.has(req.body?.maleVoice)) job.maleVoice = req.body.maleVoice;
   if (req.body?.scriptData && typeof req.body.scriptData === "object" && !Array.isArray(req.body.scriptData)) {
@@ -2091,6 +2347,11 @@ app.patch("/api/jobs/:id", (req, res) => {
   writeJobs(jobs);
   res.json(job);
 });
+
+const renderWorkerInterval = setInterval(() => {
+  processNextRenderTask().catch(error => console.error("[server-render-worker] " + (error?.message || "Unknown error")));
+}, 2000);
+renderWorkerInterval.unref?.();
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log("Antardrishti Studio running on port " + PORT + " (local network enabled)");
