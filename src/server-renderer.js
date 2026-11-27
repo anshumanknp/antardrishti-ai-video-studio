@@ -160,7 +160,8 @@ export function escapeFilterValue(value) {
 
 function writeTextFile(filePath, value) {
   fs.writeFileSync(filePath, String(value || ""), { encoding: "utf8", mode: 0o600 });
-  return escapeFilterValue(filePath);
+  // All filter assets are resolved from FFmpeg's temporary working directory.
+  return escapeFilterValue(path.basename(filePath));
 }
 
 function createSubtitleFile(filePath, cues) {
@@ -172,9 +173,9 @@ function createSubtitleFile(filePath, cues) {
   fs.writeFileSync(filePath, body + (body ? "\n" : ""), { encoding: "utf8", mode: 0o600 });
 }
 
-function runFfmpeg(ffmpegPath, args, duration, onProgress) {
+function runFfmpeg(ffmpegPath, args, duration, onProgress, cwd) {
   return new Promise((resolve, reject) => {
-    const child = spawn(ffmpegPath, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(ffmpegPath, args, { stdio: ["ignore", "pipe", "pipe"], cwd });
     let stderr = "";
     let stdoutBuffer = "";
     child.stdout.setEncoding("utf8");
@@ -225,6 +226,13 @@ export async function renderServerVideo({
     fs.mkdirSync(outputDir, { recursive: true });
     createSubtitleFile(srtTempPath, plan.subtitleCues);
 
+    // Keep every path embedded in FFmpeg's filter graph relative. Windows drive
+    // letters and nested filter escaping are fragile; FFmpeg runs from workDir.
+    const localFontFile = "NotoSansDevanagari-Regular.ttf";
+    fs.copyFileSync(fontFile, path.join(workDir, localFontFile));
+    const filterFontFile = escapeFilterValue(localFontFile);
+    const filterSubtitleFile = escapeFilterValue(path.basename(srtTempPath));
+
     const args = ["-hide_banner", "-y", "-loglevel", "error"];
     for (const slide of plan.slides) {
       if (slide.imagePath) {
@@ -260,30 +268,30 @@ export async function renderServerVideo({
 
     let currentLabel = "base";
     let headerPath = writeTextFile(path.join(workDir, "header.txt"), "ANTARDRISHTI");
-    filters.push("[" + currentLabel + "]drawtext=fontfile=" + escapeFilterValue(fontFile) +
+    filters.push("[" + currentLabel + "]drawtext=fontfile=" + filterFontFile +
       ":textfile=" + headerPath + ":expansion=none:fontcolor=0xE0BD7B:fontsize=34:x=76:y=250:shadowcolor=black@0.65:shadowx=2:shadowy=2[header]");
     currentLabel = "header";
 
     const taglinePath = writeTextFile(path.join(workDir, "tagline.txt"), "आत्म-जागरूकता");
-    filters.push("[" + currentLabel + "]drawtext=fontfile=" + escapeFilterValue(fontFile) +
+    filters.push("[" + currentLabel + "]drawtext=fontfile=" + filterFontFile +
       ":textfile=" + taglinePath + ":expansion=none:fontcolor=0xD5DFEB:fontsize=27:x=78:y=305[tagline]");
     currentLabel = "tagline";
 
     const introTitlePath = writeTextFile(path.join(workDir, "intro-title.txt"), plan.introTitle);
-    filters.push("[" + currentLabel + "]drawtext=fontfile=" + escapeFilterValue(fontFile) +
+    filters.push("[" + currentLabel + "]drawtext=fontfile=" + filterFontFile +
       ":textfile=" + introTitlePath + ":expansion=none:fontcolor=0xF4F0E8:fontsize=72:line_spacing=18:x=78:y=690:shadowcolor=black@0.65:shadowx=2:shadowy=2:enable='between(t,0.05," +
       Math.max(0.1, plan.introDuration - 0.05).toFixed(3) + ")'[introtitle]");
     currentLabel = "introtitle";
 
     const hookPath = writeTextFile(path.join(workDir, "intro-hook.txt"), plan.introHook);
-    filters.push("[" + currentLabel + "]drawtext=fontfile=" + escapeFilterValue(fontFile) +
+    filters.push("[" + currentLabel + "]drawtext=fontfile=" + filterFontFile +
       ":textfile=" + hookPath + ":expansion=none:fontcolor=0xD5DFEB:fontsize=40:line_spacing=12:x=82:y=1090:shadowcolor=black@0.65:shadowx=2:shadowy=2:enable='between(t,0.05," +
       Math.max(0.1, plan.introDuration - 0.05).toFixed(3) + ")'[introhook]");
     currentLabel = "introhook";
 
     const outroStart = plan.totalDuration - plan.outroDuration;
     const outroPath = writeTextFile(path.join(workDir, "outro-text.txt"), plan.outroText);
-    filters.push("[" + currentLabel + "]drawtext=fontfile=" + escapeFilterValue(fontFile) +
+    filters.push("[" + currentLabel + "]drawtext=fontfile=" + filterFontFile +
       ":textfile=" + outroPath + ":expansion=none:fontcolor=0xF4F0E8:fontsize=62:line_spacing=18:x=78:y=810:shadowcolor=black@0.65:shadowx=2:shadowy=2:enable='between(t," +
       outroStart.toFixed(3) + "," + plan.totalDuration.toFixed(3) + ")'[outrotext]");
     currentLabel = "outrotext";
@@ -294,9 +302,8 @@ export async function renderServerVideo({
       currentLabel = "withlogo";
     }
 
-    const fontsDir = path.dirname(fontFile);
-    filters.push("[" + currentLabel + "]subtitles=" + escapeFilterValue(srtTempPath) +
-      ":fontsdir=" + escapeFilterValue(fontsDir) +
+    filters.push("[" + currentLabel + "]subtitles=" + filterSubtitleFile +
+      ":fontsdir=." +
       ":force_style='FontName=Noto Sans Devanagari,FontSize=48,PrimaryColour=&H00F5F1E9,OutlineColour=&H9908171E,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=350'[vout]");
 
     args.push(
@@ -317,7 +324,7 @@ export async function renderServerVideo({
     args.push("-progress", "pipe:1", "-nostats", outputPath);
 
     onProgress?.(3, "Preparing Hindi subtitles and video layers");
-    await runFfmpeg(ffmpegPath, args, plan.totalDuration, progress => onProgress?.(progress, "Rendering MP4 on Oracle Cloud"));
+    await runFfmpeg(ffmpegPath, args, plan.totalDuration, progress => onProgress?.(progress, "Rendering MP4 with FFmpeg"), workDir);
     fs.copyFileSync(srtTempPath, subtitlePath);
     const stat = fs.statSync(outputPath);
     if (stat.size < 1000) throw new Error("FFmpeg ने valid MP4 file नहीं बनाई।");
