@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { buildServerRenderPlan } from "../src/server-renderer.js";
+import { buildServerRenderPlan, escapeFilterValue } from "../src/server-renderer.js";
 
 function temporaryOutput(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "antardrishti-render-plan-"));
@@ -69,4 +69,19 @@ test("render plan uses actual saved WAV duration when available", t => {
   const plan = buildServerRenderPlan(basicJob({ voiceFile: "/outputs/job-123.wav" }), outputDir);
   assert.equal(plan.voicePath, wavPath);
   assert.equal(plan.totalDuration, 6.15);
+});
+
+
+test("FFmpeg filter paths normalize Windows separators and escape drive colons", () => {
+  assert.equal(
+    escapeFilterValue("C:\\Users\\anshu\\AppData\\Local\\Antardrishti\\fonts\\NotoSansDevanagari-Regular.ttf"),
+    "C\\:/Users/anshu/AppData/Local/Antardrishti/fonts/NotoSansDevanagari-Regular.ttf"
+  );
+});
+
+test("FFmpeg filter paths keep POSIX paths and escape filter delimiters", () => {
+  assert.equal(
+    escapeFilterValue("/tmp/render,part[1]/font.ttf"),
+    "/tmp/render\\,part\\[1\\]/font.ttf"
+  );
 });
