@@ -147,9 +147,12 @@ export function buildServerRenderPlan(job, outputDir) {
   };
 }
 
-function escapeFilterValue(value) {
-  return String(value).replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "\\'").replace(/,/g, "\\,")
-    .replace(/\[/g, "\\[").replace(/\]/g, "\\]").replace(/;/g, "\\;");
+export function escapeFilterValue(value) {
+  // FFmpeg's filtergraph parser treats backslashes as escape characters.
+  // Normalize Windows paths to forward slashes before escaping filter delimiters,
+  // so e.g. C:\\Users\\Name\\font.ttf becomes C\\:/Users/Name/font.ttf.
+  return String(value).replace(/\\\\/g, "/").replace(/:/g, "\\\\:").replace(/'/g, "\\\\'").replace(/,/g, "\\\\,")
+    .replace(/\\[/g, "\\\\[").replace(/\\]/g, "\\\\]").replace(/;/g, "\\\\;");
 }
 
 function writeTextFile(filePath, value) {
